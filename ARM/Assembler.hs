@@ -13,7 +13,7 @@ module ARM.Assembler (assemble) where
     where ais = address 0 is
           ls = foldr (uncurry insertLabel) M.empty ais
           insertLabel :: Address -> Instruction -> Labels -> Labels
-          insertLabel a (Label l i) ls = insertLabel a i $ M.insert l addr ls
+          insertLabel a (Label l i) ls = insertLabel a i $ M.insert l a ls
           insertLabel _ _ ls = ls
           address :: Address -> [Instruction] -> [(Address, Instruction)]
           address a (i:is) = (a,i) : address (a + iSize i) is
