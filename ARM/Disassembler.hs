@@ -52,7 +52,7 @@ module ARM.Disassembler (disassemble, disassembleI) where
           sg = enumField 20 0x1 && enumField 6 0x1
           miscImm = fromIntegral ((w .&. 0xF00) `shiftR` 4) .|. intField 0 0xF
           lnk = enumField 24 0x1
-          bOffset = printf "%06x" $ (intField 0 0xFFFFFF :: Word32)
+          bOffset = printf "0x%06X" $ (intField 0 0xFFFFFF :: Word32)
 
   extractEnum :: (Enum a) => Word32 -> Int -> Word32 -> a
   extractEnum w s m = toEnum $ extract w s m

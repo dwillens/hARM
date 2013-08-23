@@ -30,19 +30,19 @@ module Main where
         ]
 
   branch = [([0xEA000000, 0x00000000], 
-             [B AL False "000000"
-             ,I.Label "000000" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))])
-           ,([0xEAFFFFFC], [I.Label "fffffc" (B AL False "fffffc")])
+             [B AL False "0x000000"
+             ,I.Label "0x000000" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))])
+           ,([0xEAFFFFFC], [I.Label "0xFFFFFC" (B AL False "0xFFFFFC")])
            ,([0x00000000, 0xEAFFFFF8],
-             [I.Label "fffff8" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))
-             ,B AL False "fffff8"])
+             [I.Label "0xFFFFF8" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))
+             ,B AL False "0xFFFFF8"])
            ,([0xEB000000, 0x00000000], 
-             [B AL True "000000" 
-             ,I.Label "000000" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))])
-           ,([0xEBFFFFFC], [I.Label "fffffc" (B AL True "fffffc")])
+             [B AL True "0x000000" 
+             ,I.Label "0x000000" (DP AND I.EQ False R0 R0 (SI R0 LSL 0))])
+           ,([0xEBFFFFFC], [I.Label "0xFFFFFC" (B AL True "0xFFFFFC")])
            ,([0x00000000, 0xEBFFFFF8], 
-             [I.Label "fffff8" (DP AND I.EQ False R0 R0 (SI R0 LSL 0)) 
-             ,B AL True "fffff8"])
+             [I.Label "0xFFFFF8" (DP AND I.EQ False R0 R0 (SI R0 LSL 0)) 
+             ,B AL True "0xFFFFF8"])
            ]
 
   str = [([0x44434241], [DataString "ABCD"])
