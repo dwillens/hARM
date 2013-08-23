@@ -10,6 +10,11 @@ module Main where
 
   data Machine = Machine {memory :: ArrayMemory
                          ,rf :: ArrayMemory
+                         ,z :: Bool
+                         ,n :: Bool
+                         ,c :: Bool
+                         ,v :: Bool
+                         ,input :: String
                          ,output :: String
                          }
     deriving (Show)
@@ -36,21 +41,29 @@ module Main where
     s {memory = foldl write (memory s) (zip [0,4..] ws)})
     where write :: (Memory m) => m -> (Word32, Word32) -> m
           write m (a, d) = writeMem m a d
-  empty :: Machine
-  empty = Machine {memory = ArrayMemory $ listArray (0, memSize - 1) $ replicate memSize 0
-                  ,rf = ArrayMemory $ listArray (0, rfSize - 1) $ replicate rfSize 0
-                  ,output = "HELLO"}
+
+  atReset :: Machine
+  atReset = Machine 
+    {memory = ArrayMemory $ listArray (0, memSize - 1) $ replicate memSize 0 
+    ,rf = ArrayMemory $ listArray (0, rfSize - 1) $ replicate rfSize 0 
+    ,z = False
+    ,n = False
+    ,c = False
+    ,v = False
+    ,input = ""
+    ,output = ""
+    }
   
-  reset :: State Machine ()
-  reset = state $ \_ -> ((), empty)
+  reset :: String -> State Machine ()
+  reset input = state $ \_ -> ((), atReset { input = input })
   
   main = do
     let program = [0xE280000A, 0xE2400001, 0xEAFFFFF8]
-    interact $ flip evalState empty . execute program
+    interact $ flip evalState atReset . execute program
 
   execute :: [Word32] -> String -> State Machine String
   execute program input = do
-    reset
+    reset input
     initialize program
     runUntil (\m -> readMem (rf m) 15 == 0)
     state $ (\s -> (output s, s))
