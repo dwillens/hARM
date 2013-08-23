@@ -1,4 +1,4 @@
-module Main where
+module ARM.Simulator (simulate) where
   import ARM.Disassembler
   import ARM.InstructionSet
   import Control.Monad.State
@@ -57,9 +57,8 @@ module Main where
   reset :: String -> State Machine ()
   reset input = state $ \_ -> ((), atReset { input = input })
   
-  main = do
-    let program = [0xE280000A, 0xE2400001, 0xEAFFFFF8]
-    interact $ flip evalState atReset . execute program
+  simulate :: [Word32] -> String -> String
+  simulate program = flip evalState atReset . execute program
 
   execute :: [Word32] -> String -> State Machine String
   execute program input = do
