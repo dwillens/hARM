@@ -1,12 +1,14 @@
 module ARM.Simulator (simulate) where
   import ARM.Disassembler
-  import ARM.InstructionSet
+  import ARM.InstructionSet as I
   import Control.Monad.State
   import Data.Array
   import Data.Bits
   import Data.Int
   import Data.Word
+
   import Debug.Trace
+  import Text.Printf
 
   data Machine = Machine {memory :: ArrayMemory
                          ,rf :: ArrayMemory
@@ -31,7 +33,7 @@ module ARM.Simulator (simulate) where
     writeMem (ArrayMemory m) a d = ArrayMemory $ m // [(a, d)]
 
   memSize :: (Integral a) => a
-  memSize = 512
+  memSize = 0x80000
 
   rfSize :: (Integral a) => a
   rfSize = 16
@@ -81,39 +83,138 @@ module ARM.Simulator (simulate) where
     ir <- getMemory pc
     setRegister R15 (pc + 4)
     let i = disassembleI ir
-    case i of
-      DP op cc s rd rn (IM rotate imm) -> 
-        do op1 <- getRegister rn
-           let op2 = (fromIntegral imm) `rotateR` (fromIntegral rotate)
-           let opr = case op of
-                          AND -> (.&.)
-                          EOR -> xor
-                          SUB -> (-)
-                          RSB -> subtract
-                          ADD -> (+)
-                          ADC -> (+)
-                          SBC -> (-)
-                          RSC -> subtract
-                          TST -> (.&.)
-                          TEQ -> xor 
-                          CMP -> (-)
-                          CMN -> (+)
-                          ORR -> (.|.)
-                          MOV -> flip const
-                          BIC -> \a b -> a .&. complement b
-                          MVN -> \_ b -> complement b
-           setRegister R0 (op1 `opr` op2)
-      B cc lnk offsetStr ->
-        do let offset = (read offsetStr :: Int32) `shiftL` 8 `shiftR` 8
-           let newPC = pc + fromIntegral offset
-           setRegister R15 $ newPC
-      otherwise -> error $ show i
+    c <- getCarry
+    n <- getNegative
+    v <- getOverflow
+    z <- getZero
+    traceShow (pc, i, c, n, v, z) $ return ()
+    if shouldExec i c n v z then
+      case i of
+        DP op cc s rd rn so ->
+          do op1 <- getRegister rn
+             (op2, sc) <- getShifterOperand so
+             let (wb, result, c', v') = decodeDP op op1 op2 c sc v
+             let n' = isNegative result
+             let z' = result == 0
+             if s 
+              then do setCarry c'
+                      setNegative n'
+                      setOverflow v'
+                      setZero z'
+              else return ()
+             if wb then setRegister rd result else return ()
+        B cc lnk offsetStr ->
+          do let offset = (read offsetStr :: Int32) `shiftL` 8 `shiftR` 8
+             oldPC <- getRegister R15
+             if lnk then setRegister R14 oldPC else return () 
+             let newPC = oldPC + fromIntegral offset
+             setRegister R15 $ newPC
+        MEM LDR cc sg sz rd rn dir (MEMI offset) -> 
+          do base <- getRegister rn
+             let addr = base + (fromIntegral offset)
+             val <- case addr of
+                         0x00FF00 -> return 0x0F
+                         0x00FF02 -> getInputByte 
+                         otherwise -> getMemory addr
+             setRegister rd val
+        MEM STR cc sg sz rd rn dir (MEMI offset) -> 
+          do val <- getRegister rd
+             base <- getRegister rn
+             let addr = base + (fromIntegral offset)
+             case addr of
+                  0x00FF00 -> return ()
+                  0x00FF02 -> putOutputByte val
+                  otherwise -> setMemory addr val
+        otherwise -> error $ show i
+      else return ()
     return ()
+
+  shouldExec :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
+  shouldExec (DP _ cc _ _ _ _) = shouldExec' cc
+  shouldExec (B cc _ _) = shouldExec' cc
+  shouldExec (MEM _ cc _ _ _ _ _ _) = shouldExec' cc
+
+  shouldExec' :: ConditionCode -> Bool -> Bool -> Bool -> Bool -> Bool
+  shouldExec' I.EQ _ _ _ z = z
+  shouldExec' I.NE _ _ _ z = not z
+  shouldExec'   AL _ _ _ _ = True
+
+  decodeDP :: DPOpcode -> Word32 -> Word32 -> Bool -> Bool -> Bool -> 
+              (Bool, Word32, Bool, Bool)
+  decodeDP AND a b c sc v = (True, a .&. b, sc, v)
+  decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
+  decodeDP SUB a b c sc v = (True, a - b, carry a (-b) False, overflow a (-b) False)
+  decodeDP RSB a b c sc v = (True, b - a, carry (-a) b False, overflow (-a) b False)
+  decodeDP ADD a b c sc v = (True, a + b, carry a b False, overflow a b False)
+  decodeDP ADC a b c sc v = (True, a + b + cint, carry a b c, overflow a b c)
+    where cint = fromIntegral . fromEnum $ c
+  decodeDP SBC a b c sc v = (True, a - b - ncint, carry a (-b) nc, overflow a (-b) nc)
+    where nc = not c
+          ncint = fromIntegral . fromEnum $ nc
+  decodeDP RSC a b c sc v = (True, b - a - ncint, carry (-a) b nc, overflow (-a) b nc)
+    where nc = not c
+          ncint = fromIntegral . fromEnum $ nc
+  decodeDP TST a b c sc v = (False, a .&. b, sc, v)
+  decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
+  decodeDP CMP a b c sc v = (False, a - b, carry a (-b) False, overflow a (-b) False)
+  decodeDP CMN a b c sc v = (False, a + b, carry a b False, overflow a b False)
+  decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
+  decodeDP MOV a b c sc v = (True, b, sc, v)
+  decodeDP BIC a b c sc v = (True, a .&. complement b, sc, v)
+  decodeDP MVN a b c sc v = (True, complement b, sc, v)
+
+  carry :: Word32 -> Word32 -> Bool -> Bool
+  carry a b c = False
+
+  overflow :: Word32 -> Word32 -> Bool -> Bool
+  overflow a b c = False
+
+  isNegative :: Word32 -> Bool
+  isNegative = (> maxBound `div` 2)
+
+  getFlag :: (Machine -> Bool) -> State Machine Bool
+  getFlag f = state $ \s -> (f s, s)
+
+  getCarry, getOverflow, getNegative, getZero :: State Machine Bool
+  getCarry = getFlag c
+  getOverflow = getFlag v
+  getNegative = getFlag n
+  getZero = getFlag z
+
+  setCarry, setOverflow, setNegative, setZero :: Bool -> State Machine ()
+  setCarry b = state $ \s -> ((), s { c = b })
+  setOverflow b = state $ \s -> ((), s { v = b })
+  setNegative b = state $ \s -> ((), s { n = b })
+  setZero b = state $ \s -> ((), s { z = b })
+
+  getInputByte :: State Machine Word32
+  getInputByte = state $ \s -> (fromIntegral $ fromEnum $ head $ input s, 
+                                s { input = tail $ input s})
+
+  putOutputByte :: Word32 -> State Machine ()
+  putOutputByte val = state $ \s -> 
+    ((), s { output = (output s ++ [toEnum $ fromIntegral val])})
+
+  getShifterOperand :: ShifterOperand -> State Machine (Word32, Bool)
+  getShifterOperand (IM rotate imm) = state $ \s ->
+    (((fromIntegral imm) `rotateR` (fromIntegral rotate), False), s)
+  getShifterOperand (SI rm sh amt) = do
+    val <- getRegister rm
+    let op = case sh of
+                  LSL -> shiftL
+                  LSR -> shiftR
+                  ASR -> \val amt -> fromIntegral $ 
+                                      (fromIntegral val :: Int32) `shiftR` amt
+                  ROR -> rotateR
+    return $ (val `op` (fromIntegral amt), False)
+  getShifterOperand so = error $ show so
 
   getMem :: (Memory m) => (Machine -> m) -> Word32 -> State Machine Word32
   getMem m a = state (\s -> (readMem (m s) a, s))
 
+  getMemory :: Word32 -> State Machine Word32
   getMemory = getMem memory
+
   getRegister :: Register -> State Machine Word32
   getRegister = getMem rf . fromIntegral . fromEnum
 
