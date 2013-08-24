@@ -12,6 +12,7 @@ main:
 putchar:
    MOV R1 #0xFF00
    MOV R2 #0xA
+   
 putchar_loop:
    TST R2 #0xA
    B EQ R14
@@ -20,10 +21,14 @@ putchar_loop:
    AND R3 R3 R2
    TST R3 #0x2
    STR NE BYTE R0 R1 #0x2
+   MOV NE R0 #0x2
+   STR NE BYTE R0 R1 #0x0
    BIC NE R2 R2 #0x2
 
    TST R3 #0x8
    STR NE BYTE R0 R1 #0x4
+   MOV NE R0 #0x8
+   STR NE BYTE R0 R1 #0x0
    BIC NE R2 R2 #0x8
 
    B putchar_loop
