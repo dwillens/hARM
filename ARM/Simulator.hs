@@ -38,14 +38,15 @@ module ARM.Simulator (simulate) where
   rfSize :: (Integral a) => a
   rfSize = 16
 
-  initialize :: [Word32] -> State Machine ()
-  initialize ws = state $ \s -> ((), 
-    s {memory = foldl write (memory s) (zip [0,4..] ws)})
+  initialize :: [Word32] -> String -> State Machine ()
+  initialize program input = state $ \s -> ((), 
+    s {memory = foldl write (memory s) (zip [0,4..] program)
+      ,input = input})
     where write :: (Memory m) => m -> (Word32, Word32) -> m
           write m (a, d) = writeMem m a d
 
-  atReset :: Machine
-  atReset = Machine 
+  reset :: Machine
+  reset = Machine 
     {memory = ArrayMemory $ listArray (0, memSize - 1) $ replicate memSize 0 
     ,rf = ArrayMemory $ listArray (0, rfSize - 1) $ replicate rfSize 0 
     ,z = False
@@ -56,16 +57,12 @@ module ARM.Simulator (simulate) where
     ,output = ""
     }
   
-  reset :: String -> State Machine ()
-  reset input = state $ \_ -> ((), atReset { input = input })
-  
   simulate :: [Word32] -> String -> String
-  simulate program = flip evalState atReset . execute program
+  simulate program = flip evalState reset . execute program
 
   execute :: [Word32] -> String -> State Machine String
   execute program input = do
-    reset input
-    initialize program
+    initialize program input 
     runUntil (\m -> readMem (rf m) 15 == 0)
     state $ (\s -> (output s, s))
 
@@ -92,7 +89,7 @@ module ARM.Simulator (simulate) where
     --r8 <- getRegister R8
     --sp <- getRegister R13
     --traceShow (pc, i, c, n, v, z, sp, r0, r8) $ return ()
-    if shouldExec i c n v z then
+    if condition i c n v z then
       case i of
         DP op cc s rd rn so ->
           do op1 <- getRegister rn
@@ -165,27 +162,27 @@ module ARM.Simulator (simulate) where
       else return ()
     return ()
 
-  shouldExec :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
-  shouldExec (DP _ cc _ _ _ _) = shouldExec' cc
-  shouldExec (B cc _ _) = shouldExec' cc
-  shouldExec (MEM _ cc _ _ _ _ _ _) = shouldExec' cc
+  condition :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
+  condition (DP _ cc _ _ _ _) = condition' cc
+  condition (B cc _ _) = condition' cc
+  condition (MEM _ cc _ _ _ _ _ _) = condition' cc
 
-  shouldExec' :: ConditionCode -> Bool -> Bool -> Bool -> Bool -> Bool
-  shouldExec' I.EQ _ _ _ z = z
-  shouldExec' I.NE _ _ _ z = not z
-  shouldExec'   CS c _ _ _ = c
-  shouldExec'   CC c _ _ _ = not c
-  shouldExec'   MI _ n _ _ = n
-  shouldExec'   PL _ n _ _ = not n
-  shouldExec'   VS _ _ v _ = v
-  shouldExec'   VC _ _ v _ = not v
-  shouldExec'   HI c _ _ z = c && not z
-  shouldExec'   LS c _ _ z = not c || z
-  shouldExec'   GE _ n v _ = n == v
-  shouldExec' I.LT _ n v _ = n /= v
-  shouldExec' I.GT _ n v z = n == v && not z
-  shouldExec'   LE _ n v z = n /= v || z
-  shouldExec'   AL _ _ _ _ = True
+  condition' :: ConditionCode -> Bool -> Bool -> Bool -> Bool -> Bool
+  condition' I.EQ _ _ _ z = z
+  condition' I.NE _ _ _ z = not z
+  condition'   CS c _ _ _ = c
+  condition'   CC c _ _ _ = not c
+  condition'   MI _ n _ _ = n
+  condition'   PL _ n _ _ = not n
+  condition'   VS _ _ v _ = v
+  condition'   VC _ _ v _ = not v
+  condition'   HI c _ _ z = c && not z
+  condition'   LS c _ _ z = not c || z
+  condition'   GE _ n v _ = n == v
+  condition' I.LT _ n v _ = n /= v
+  condition' I.GT _ n v z = n == v && not z
+  condition'   LE _ n v z = n /= v || z
+  condition'   AL _ _ _ _ = True
 
   decodeDP :: DPOpcode -> Word32 -> Word32 -> Word32 -> Bool -> Bool -> 
               (Bool, Word32, Bool, Bool)
