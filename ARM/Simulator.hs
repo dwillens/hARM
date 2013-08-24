@@ -87,6 +87,7 @@ module ARM.Simulator (simulate) where
     n <- getNegative
     v <- getOverflow
     z <- getZero
+    let ci = fromIntegral $ fromEnum c
     --sp <- getRegister R13
     --traceShow (pc, i, c, n, v, z, sp) $ return ()
     if shouldExec i c n v z then
@@ -94,7 +95,7 @@ module ARM.Simulator (simulate) where
         DP op cc s rd rn so ->
           do op1 <- getRegister rn
              (op2, sc) <- getShifterOperand so
-             let (wb, result, c', v') = decodeDP op op1 op2 c sc v
+             let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
              let n' = isNegative result
              let z' = result == 0
              if s 
@@ -168,36 +169,48 @@ module ARM.Simulator (simulate) where
   shouldExec' :: ConditionCode -> Bool -> Bool -> Bool -> Bool -> Bool
   shouldExec' I.EQ _ _ _ z = z
   shouldExec' I.NE _ _ _ z = not z
+  shouldExec'   CS c _ _ _ = c
+  shouldExec'   CC c _ _ _ = not c
+  shouldExec'   MI _ n _ _ = n
+  shouldExec'   PL _ n _ _ = not n
+  shouldExec'   VS _ _ v _ = v
+  shouldExec'   VC _ _ v _ = not v
+  shouldExec'   HI c _ _ z = c && not z
+  shouldExec'   LS c _ _ z = not c || z
+  shouldExec'   GE _ n v _ = n == v
+  shouldExec' I.LT _ n v _ = n /= v
+  shouldExec' I.GT _ n v z = n == v && not z
+  shouldExec'   LE _ n v z = n /= v || z
   shouldExec'   AL _ _ _ _ = True
 
-  decodeDP :: DPOpcode -> Word32 -> Word32 -> Bool -> Bool -> Bool -> 
+  decodeDP :: DPOpcode -> Word32 -> Word32 -> Word32 -> Bool -> Bool -> 
               (Bool, Word32, Bool, Bool)
   decodeDP AND a b c sc v = (True, a .&. b, sc, v)
   decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c sc v = (True, a - b, carry a (-b) False, overflow a (-b) False)
-  decodeDP RSB a b c sc v = (True, b - a, carry (-a) b False, overflow (-a) b False)
-  decodeDP ADD a b c sc v = (True, a + b, carry a b False, overflow a b False)
-  decodeDP ADC a b c sc v = (True, a + b + cint, carry a b c, overflow a b c)
-    where cint = fromIntegral . fromEnum $ c
-  decodeDP SBC a b c sc v = (True, a - b - ncint, carry a (-b) nc, overflow a (-b) nc)
-    where nc = not c
-          ncint = fromIntegral . fromEnum $ nc
-  decodeDP RSC a b c sc v = (True, b - a - ncint, carry (-a) b nc, overflow (-a) b nc)
-    where nc = not c
-          ncint = fromIntegral . fromEnum $ nc
+  decodeDP SUB a b c sc v = (True, a - b, carry a (-b) 0, overflow a (-b) 0)
+  decodeDP RSB a b c sc v = (True, b - a, carry (-a) b 0, overflow (-a) b 0)
+  decodeDP ADD a b c sc v = (True, a + b, carry a b 0, overflow a b 0)
+  decodeDP ADC a b c sc v = (True, a + b + c, carry a b c, overflow a b c)
+  decodeDP SBC a b c sc v = (True, a - b - nc, carry a (-b) nc, overflow a (-b) nc)
+    where nc = 1 - c
+  decodeDP RSC a b c sc v = (True, b - a - nc, carry (-a) b nc, overflow (-a) b nc)
+    where nc = 1 - c
   decodeDP TST a b c sc v = (False, a .&. b, sc, v)
   decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c sc v = (False, a - b, carry a (-b) False, overflow a (-b) False)
-  decodeDP CMN a b c sc v = (False, a + b, carry a b False, overflow a b False)
+  decodeDP CMP a b c sc v = (False, a - b, carry a (-b) 0, overflow a (-b) 0)
+  decodeDP CMN a b c sc v = (False, a + b, carry a b 0, overflow a b 0)
   decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
   decodeDP MOV a b c sc v = (True, b, sc, v)
   decodeDP BIC a b c sc v = (True, a .&. complement b, sc, v)
   decodeDP MVN a b c sc v = (True, complement b, sc, v)
 
-  carry :: Word32 -> Word32 -> Bool -> Bool
-  carry a b c = False
+  carry :: Word32 -> Word32 -> Word32 -> Bool
+  carry a b c = a64 + b64 + c64 > fromIntegral (maxBound :: Word32)
+    where a64 = fromIntegral a :: Word64
+          b64 = fromIntegral b :: Word64
+          c64 = fromIntegral c :: Word64
 
-  overflow :: Word32 -> Word32 -> Bool -> Bool
+  overflow :: Word32 -> Word32 -> Word32 -> Bool
   overflow a b c = False
 
   isNegative :: Word32 -> Bool
