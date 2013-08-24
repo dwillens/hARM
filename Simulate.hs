@@ -8,8 +8,6 @@ module Main where
 
   main = do
     (input:_) <- getArgs
-    let (Just baseNameRev) = stripPrefix "s." . reverse $ input
-        output = reverse ("tuo." ++ baseNameRev)
     contents <- readFile input
     let instructions = parseARM contents
         program = assemble instructions
