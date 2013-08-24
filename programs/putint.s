@@ -61,13 +61,13 @@ putint:
    MOV R10     #0x05F00000
    ADD R10 R10 #0x0005E000
    ADD R10 R10 #0x00000100
-   MOV R0 #0x30
 
    MOV S R8 R0
    RSB MI R8 R0 #0
    MOV MI R0 #0x2D
    B MI L putchar
 
+   MOV R0 #0x30
 putint_loop:
    CMP R8 R10
    SUB LS R8 R8 R10

@@ -34,6 +34,7 @@ puts_loop:
    TST R0 R0
    LDR EQ R8 R13 #0x4
    LDR EQ R14 R13
+   ADD EQ R13 R13 #0x8
    B EQ R14
    B L putchar
    ADD R8 R8 #1
@@ -43,7 +44,7 @@ puts_loop:
 putchar:
    MOV R1 #0xFF00
    MOV R2 #0xA
-   
+
 putchar_loop:
    TST R2 #0xA
    B EQ R14
