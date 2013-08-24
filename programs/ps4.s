@@ -37,7 +37,7 @@ main:
    B R14
 
 prompt:
-   .string "\n\nEnter two numbers: \0"
+   .string "\n\nEnter two numbers: \n\0"
 
 
 puts:
