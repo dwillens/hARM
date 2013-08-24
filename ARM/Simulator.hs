@@ -87,7 +87,8 @@ module ARM.Simulator (simulate) where
     n <- getNegative
     v <- getOverflow
     z <- getZero
-    traceShow (pc, i, c, n, v, z) $ return ()
+    --sp <- getRegister R13
+    --traceShow (pc, i, c, n, v, z, sp) $ return ()
     if shouldExec i c n v z then
       case i of
         DP op cc s rd rn so ->
@@ -112,19 +113,49 @@ module ARM.Simulator (simulate) where
         MEM LDR cc sg sz rd rn dir (MEMI offset) -> 
           do base <- getRegister rn
              let addr = base + (fromIntegral offset)
-             val <- case addr of
-                         0x00FF00 -> return 0x0F
-                         0x00FF02 -> getInputByte 
-                         otherwise -> getMemory addr
-             setRegister rd val
+             let wordAddr = addr .&. complement 0x3
+             let subWordAddr = addr .&. 0x3
+             let shift = fromIntegral (subWordAddr * 8)
+             case sz of
+              WORD -> 
+                do val <- getMemory wordAddr
+                   setRegister rd val
+              BYTE ->
+                do val <- case wordAddr of
+                            0x00FF00 -> case subWordAddr of
+                                          0x0 -> return 0x0F
+                                          0x2 -> getInputByte
+                                          otherwise -> return 0x00
+                            0x00FF04 -> case subWordAddr of
+                                          0x0 -> getInputByte 
+                                          otherwise -> return 0x00
+                            otherwise -> getMemory wordAddr
+                   --traceShow ("LDR", addr, wordAddr, subWordAddr, val) $ return () 
+                   setRegister rd $ (val `shiftR` shift) .&. 0xFF
         MEM STR cc sg sz rd rn dir (MEMI offset) -> 
           do val <- getRegister rd
              base <- getRegister rn
              let addr = base + (fromIntegral offset)
-             case addr of
-                  0x00FF00 -> return ()
-                  0x00FF02 -> putOutputByte val
-                  otherwise -> setMemory addr val
+             let wordAddr = addr .&. complement 0x3
+             let subWordAddr = addr .&. 0x3
+             let shift = fromIntegral (subWordAddr * 8)
+             case sz of
+              WORD -> setMemory wordAddr val
+              BYTE -> do --traceShow ("STR", addr, wordAddr, subWordAddr, val) $ return ()
+                         oldVal <- getMemory wordAddr
+                         let old = oldVal .&. complement (0xFF `shiftL` shift)
+                         case wordAddr of
+                            0x00FF00 -> case subWordAddr of 
+                                              0x0 -> if val .&. 0xA /= 0 
+                                                      then do w <- getMemory 0x00FF00
+                                                              putOutputByte w
+                                                      else return ()
+                                              0x2 -> setMemory 0x00FF00 val 
+                                              otherwise -> return ()
+                            0x00FF04 -> case subWordAddr of
+                                              0x0 -> setMemory 0x00FF00 val
+                                              otherwise -> return ()
+                            otherwise -> setMemory wordAddr $ old .|. (val `shiftL` shift)
         otherwise -> error $ show i
       else return ()
     return ()
