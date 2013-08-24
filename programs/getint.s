@@ -59,10 +59,10 @@ getint:
 
 getint_loop:
    SUB S R0 R0 #0x30
-   B LO getint_exit
-   CMP R0 #0x9
-   B HI getint_exit
-
+   B HS getint_exit
+   CMP R0 #0xA
+   B LS getint_exit
+   
    ADD R1 R8 R8
    ADD R8 R1 R1
    ADD R8 R8 R8

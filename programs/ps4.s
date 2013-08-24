@@ -11,22 +11,29 @@ _init:
    B _init
 
 main:
-   SUB R13 R13 #0x4
+   SUB R13 R13 #0x8
    STR R14 R13
+   STR R8 R13 #0x4
 
    .la R0 prompt
    B L puts
 
    B L getint
-   MOV R1 R0
+   MOV R8 R0
+
    B L getint
 
+   MOV R1 R8
    B L product
 
    B L putint
 
+   MOV R0 #0xA
+   B L putchar
+
+   LDR R8 R13 #0x4
    LDR R14 R13
-   ADD R13 R13 #0x4
+   ADD R13 R13 #0x8
    B R14
 
 prompt:
@@ -91,9 +98,9 @@ getint:
 
 getint_loop:
    SUB S R0 R0 #0x30
-   B LO getint_exit
-   CMP R0 #0x9
-   B HI getint_exit
+   B HS getint_exit
+   CMP R0 #0xA
+   B LS getint_exit
 
    ADD R1 R8 R8
    ADD R8 R1 R1
