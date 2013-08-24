@@ -152,7 +152,9 @@ module ARM.Simulator (simulate) where
                                               0x0 -> if val .&. 0xA /= 0 
                                                       then do w <- getMemory 0x00FF00
                                                               putOutputByte w
-                                                      else return ()
+                                                      else if val .&. 0x5 /= 0
+                                                            then advanceInput
+                                                            else return ()
                                               0x2 -> setMemory 0x00FF00 val 
                                               otherwise -> return ()
                             0x00FF04 -> case subWordAddr of
@@ -234,8 +236,10 @@ module ARM.Simulator (simulate) where
   setZero b = state $ \s -> ((), s { z = b })
 
   getInputByte :: State Machine Word32
-  getInputByte = state $ \s -> (fromIntegral $ fromEnum $ head $ input s, 
-                                s { input = tail $ input s})
+  getInputByte = state $ \s -> (fromIntegral $ fromEnum $ head $ input s, s)
+
+  advanceInput :: State Machine ()
+  advanceInput = state $ \s -> ((), s { input = tail $ input s })
 
   putOutputByte :: Word32 -> State Machine ()
   putOutputByte val = state $ \s -> 
