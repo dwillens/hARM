@@ -88,8 +88,9 @@ module ARM.Simulator (simulate) where
     v <- getOverflow
     z <- getZero
     let ci = fromIntegral $ fromEnum c
+    --r0 <- getRegister R0
     --sp <- getRegister R13
-    --traceShow (pc, i, c, n, v, z, sp) $ return ()
+    --traceShow (pc, i, c, n, v, z, sp, r0) $ return ()
     if shouldExec i c n v z then
       case i of
         DP op cc s rd rn so ->
@@ -125,7 +126,7 @@ module ARM.Simulator (simulate) where
                 do val <- case wordAddr of
                             0x00FF00 -> case subWordAddr of
                                           0x0 -> return 0x0F
-                                          0x2 -> getInputByte
+                                          0x2 -> liftM (flip shiftL 16) getInputByte
                                           otherwise -> return 0x00
                             0x00FF04 -> case subWordAddr of
                                           0x0 -> getInputByte 

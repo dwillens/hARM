@@ -19,6 +19,7 @@ main:
    ADD R13 R13 #0x104
    B R14
 
+
 gets:
    SUB R13 R13 #0x8
    STR R14 R13
@@ -37,15 +38,20 @@ gets_loop:
    ADD R8 R8 #1
    B gets_loop
 
+
 getchar:
    MOV R1 #0x00FF00
 
 getchar_loop:
    LDR BYTE R0 R1
    TST R0 #0x1
-   LDR EQ BYTE R0 R1 #0x2
-   B EQ R14
+   LDR NE BYTE R0 R1 #0x2
+   MOV NE R2 #0x1
+   STR NE BYTE R2 R1
+   B NE R14
    TST R0 #0x4
-   LDR EQ BYTE R0 R1 #0x4
-   B EQ R14
+   LDR NE BYTE R0 R1 #0x4
+   MOV NE R2 #0x4
+   STR NE BYTE R2 R1
+   B NE R14
    B getchar_loop
