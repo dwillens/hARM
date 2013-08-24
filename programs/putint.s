@@ -89,12 +89,13 @@ putint_loop:
    LDR R9 R13 #0x8
    LDR R8 R13 #0x4
    LDR R14 R13
+   ADD R13 R13 #0x10
    B R14
 
 putchar:
    MOV R1 #0xFF00
    MOV R2 #0xA
-   
+
 putchar_loop:
    TST R2 #0xA
    B EQ R14

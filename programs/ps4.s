@@ -191,4 +191,5 @@ putint_loop:
    LDR R9 R13 #0x8
    LDR R8 R13 #0x4
    LDR R14 R13
+   ADD R13 R13 #0x10
    B R14
