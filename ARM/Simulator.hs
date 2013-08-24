@@ -89,8 +89,9 @@ module ARM.Simulator (simulate) where
     z <- getZero
     let ci = fromIntegral $ fromEnum c
     --r0 <- getRegister R0
+    --r8 <- getRegister R8
     --sp <- getRegister R13
-    --traceShow (pc, i, c, n, v, z, sp, r0) $ return ()
+    --traceShow (pc, i, c, n, v, z, sp, r0, r8) $ return ()
     if shouldExec i c n v z then
       case i of
         DP op cc s rd rn so ->
@@ -188,17 +189,17 @@ module ARM.Simulator (simulate) where
               (Bool, Word32, Bool, Bool)
   decodeDP AND a b c sc v = (True, a .&. b, sc, v)
   decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c sc v = (True, a - b, carry a (-b) 0, overflow a (-b) 0)
-  decodeDP RSB a b c sc v = (True, b - a, carry (-a) b 0, overflow (-a) b 0)
+  decodeDP SUB a b c sc v = (True, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
+  decodeDP RSB a b c sc v = (True, b - a, not $ carry (-a) b 0, overflow (-a) b 0)
   decodeDP ADD a b c sc v = (True, a + b, carry a b 0, overflow a b 0)
   decodeDP ADC a b c sc v = (True, a + b + c, carry a b c, overflow a b c)
-  decodeDP SBC a b c sc v = (True, a - b - nc, carry a (-b) nc, overflow a (-b) nc)
+  decodeDP SBC a b c sc v = (True, a - b - nc, not $ carry a (-b) nc, overflow a (-b) nc)
     where nc = 1 - c
-  decodeDP RSC a b c sc v = (True, b - a - nc, carry (-a) b nc, overflow (-a) b nc)
+  decodeDP RSC a b c sc v = (True, b - a - nc, not $ carry (-a) b nc, overflow (-a) b nc)
     where nc = 1 - c
   decodeDP TST a b c sc v = (False, a .&. b, sc, v)
   decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c sc v = (False, a - b, carry a (-b) 0, overflow a (-b) 0)
+  decodeDP CMP a b c sc v = (False, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
   decodeDP CMN a b c sc v = (False, a + b, carry a b 0, overflow a b 0)
   decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
   decodeDP MOV a b c sc v = (True, b, sc, v)
