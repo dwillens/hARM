@@ -39,9 +39,9 @@ module ARM.Simulator (simulate) where
   rfSize = 16
 
   initialize :: [Word32] -> String -> State Machine ()
-  initialize program input = state $ \s -> ((), 
+  initialize program input = modify $ \s -> 
     s {memory = foldl write (memory s) (zip [0,4..] program)
-      ,input = input})
+      ,input = input}
     where write :: (Memory m) => m -> (Word32, Word32) -> m
           write m (a, d) = writeMem m a d
 
@@ -57,22 +57,20 @@ module ARM.Simulator (simulate) where
     ,output = ""
     }
   
-  simulate :: [Word32] -> String -> String
-  simulate program = flip evalState reset . execute program
+  simulate :: [Word32] -> IO ()
+  simulate program = interact $ flip evalState reset . execute program
 
   execute :: [Word32] -> String -> State Machine String
   execute program input = do
     initialize program input 
     runUntil (\m -> readMem (rf m) 15 == 0)
-    state $ (\s -> (output s, s))
+    gets output
 
   runUntil :: (Machine -> Bool) -> State Machine ()
   runUntil p = do
       step
-      done <- isDone p
-      if done then return () else runUntil p
-    where isDone :: (Machine -> Bool) -> State Machine Bool
-          isDone p = state $ \s -> (p s, s)
+      stop <- gets p 
+      if stop then return () else runUntil p
 
   step :: State Machine ()
   step = do
@@ -80,10 +78,10 @@ module ARM.Simulator (simulate) where
     ir <- getMemory pc
     setRegister R15 (pc + 4)
     let i = disassembleI ir
-    c <- getCarry
-    n <- getNegative
-    v <- getOverflow
-    z <- getZero
+    c <- gets c
+    n <- gets n
+    v <- gets v
+    z <- gets z
     let ci = fromIntegral $ fromEnum c
     --r0 <- getRegister R0
     --r8 <- getRegister R8
@@ -95,13 +93,10 @@ module ARM.Simulator (simulate) where
           do op1 <- getRegister rn
              (op2, sc) <- getShifterOperand so
              let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
-             let n' = isNegative result
+             let n' = result > maxBound `div` 2
              let z' = result == 0
              if s 
-              then do setCarry c'
-                      setNegative n'
-                      setOverflow v'
-                      setZero z'
+              then modify $ \s -> s {c = c', n = n', v = v', z = z'}
               else return ()
              if wb then setRegister rd result else return ()
         B cc lnk offsetStr ->
@@ -212,39 +207,27 @@ module ARM.Simulator (simulate) where
           c64 = fromIntegral c :: Word64
 
   overflow :: Word32 -> Word32 -> Word32 -> Bool
-  overflow a b c = False
-
-  isNegative :: Word32 -> Bool
-  isNegative = (> maxBound `div` 2)
-
-  getFlag :: (Machine -> Bool) -> State Machine Bool
-  getFlag f = state $ \s -> (f s, s)
-
-  getCarry, getOverflow, getNegative, getZero :: State Machine Bool
-  getCarry = getFlag c
-  getOverflow = getFlag v
-  getNegative = getFlag n
-  getZero = getFlag z
-
-  setCarry, setOverflow, setNegative, setZero :: Bool -> State Machine ()
-  setCarry b = state $ \s -> ((), s { c = b })
-  setOverflow b = state $ \s -> ((), s { v = b })
-  setNegative b = state $ \s -> ((), s { n = b })
-  setZero b = state $ \s -> ((), s { z = b })
+  overflow a b c = fromIntegral (a32 + b32 + c32) == a64 + b64 + c64
+    where a32 = fromIntegral a :: Int32
+          b32 = fromIntegral b :: Int32
+          c32 = fromIntegral c :: Int32
+          a64 = fromIntegral a :: Int64
+          b64 = fromIntegral b :: Int64
+          c64 = fromIntegral c :: Int64
 
   getInputByte :: State Machine Word32
-  getInputByte = state $ \s -> (fromIntegral $ fromEnum $ head $ input s, s)
+  getInputByte = gets $ fromIntegral . fromEnum . head . input
 
   advanceInput :: State Machine ()
-  advanceInput = state $ \s -> ((), s { input = tail $ input s })
+  advanceInput = modify $ \s -> s { input = tail $ input s }
 
   putOutputByte :: Word32 -> State Machine ()
-  putOutputByte val = state $ \s -> 
-    ((), s { output = (output s ++ [toEnum $ fromIntegral val])})
+  putOutputByte val = modify $ \s -> 
+    s { output = (output s ++ [toEnum $ fromIntegral val]) }
 
   getShifterOperand :: ShifterOperand -> State Machine (Word32, Bool)
-  getShifterOperand (IM rotate imm) = state $ \s ->
-    (((fromIntegral imm) `rotateR` (fromIntegral rotate), False), s)
+  getShifterOperand (IM rotate imm) = return
+    ((fromIntegral imm) `rotateR` (fromIntegral rotate), False)
   getShifterOperand (SI rm sh amt) = do
     val <- getRegister rm
     let op = case sh of

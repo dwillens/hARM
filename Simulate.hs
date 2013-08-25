@@ -11,4 +11,4 @@ module Main where
     contents <- readFile input
     let instructions = parseARM contents
         program = assemble instructions
-    interact $ simulate program
+    simulate program
