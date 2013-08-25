@@ -21,16 +21,16 @@ module ARM.Simulator (simulate) where
                          }
     deriving (Show)
 
-  newtype ArrayMemory = ArrayMemory (Array Word32 Word32)
+  newtype ArrayMemory = ArrayMemory {mem :: Array Word32 Word32}
     deriving (Show)
 
   class Memory m where
-    readMem :: m -> Word32 -> Word32
-    writeMem :: m -> Word32 -> Word32 -> m
+    readMem :: Word32 -> m -> Word32
+    writeMem :: Word32 -> Word32 -> m -> m
 
   instance Memory ArrayMemory where
-    readMem (ArrayMemory m) = (m !)
-    writeMem (ArrayMemory m) a d = ArrayMemory $ m // [(a, d)]
+    readMem d = (! d) . mem
+    writeMem a d = ArrayMemory . flip (//) [(a, d)] . mem
 
   memSize :: (Integral a) => a
   memSize = 0x80000
@@ -40,10 +40,8 @@ module ARM.Simulator (simulate) where
 
   initialize :: [Word32] -> String -> State Machine ()
   initialize program input = modify $ \s -> 
-    s {memory = foldl write (memory s) (zip [0,4..] program)
+    s {memory = foldr (uncurry writeMem) (memory s) $ zip [0,4..] program
       ,input = input}
-    where write :: (Memory m) => m -> (Word32, Word32) -> m
-          write m (a, d) = writeMem m a d
 
   reset :: Machine
   reset = Machine 
@@ -63,7 +61,7 @@ module ARM.Simulator (simulate) where
   execute :: [Word32] -> String -> State Machine String
   execute program input = do
     initialize program input 
-    runUntil (\m -> readMem (rf m) 15 == 0)
+    runUntil $ (== 0) . readMem 15 . rf
     gets output
 
   runUntil :: (Machine -> Bool) -> State Machine ()
@@ -183,17 +181,22 @@ module ARM.Simulator (simulate) where
               (Bool, Word32, Bool, Bool)
   decodeDP AND a b c sc v = (True, a .&. b, sc, v)
   decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c sc v = (True, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP RSB a b c sc v = (True, b - a, not $ carry (-a) b 0, overflow (-a) b 0)
+  decodeDP SUB a b c sc v = (True, a - b, 
+                             not $ carry a (-b) 0, overflow a (-b) 0)
+  decodeDP RSB a b c sc v = (True, b - a, 
+                             not $ carry (-a) b 0, overflow (-a) b 0)
   decodeDP ADD a b c sc v = (True, a + b, carry a b 0, overflow a b 0)
   decodeDP ADC a b c sc v = (True, a + b + c, carry a b c, overflow a b c)
-  decodeDP SBC a b c sc v = (True, a - b - nc, not $ carry a (-b) nc, overflow a (-b) nc)
+  decodeDP SBC a b c sc v = (True, a - b - nc, 
+                             not $ carry a (-b) nc, overflow a (-b) nc)
     where nc = 1 - c
-  decodeDP RSC a b c sc v = (True, b - a - nc, not $ carry (-a) b nc, overflow (-a) b nc)
+  decodeDP RSC a b c sc v = (True, b - a - nc, 
+                             not $ carry (-a) b nc, overflow (-a) b nc)
     where nc = 1 - c
   decodeDP TST a b c sc v = (False, a .&. b, sc, v)
   decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c sc v = (False, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
+  decodeDP CMP a b c sc v = (False, a - b, 
+                             not $ carry a (-b) 0, overflow a (-b) 0)
   decodeDP CMN a b c sc v = (False, a + b, carry a b 0, overflow a b 0)
   decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
   decodeDP MOV a b c sc v = (True, b, sc, v)
@@ -240,7 +243,7 @@ module ARM.Simulator (simulate) where
   getShifterOperand so = error $ show so
 
   getMem :: (Memory m) => (Machine -> m) -> Word32 -> State Machine Word32
-  getMem m a = state (\s -> (readMem (m s) a, s))
+  getMem m a = gets $ readMem a . m
 
   getMemory :: Word32 -> State Machine Word32
   getMemory = getMem memory
@@ -249,8 +252,8 @@ module ARM.Simulator (simulate) where
   getRegister = getMem rf . fromIntegral . fromEnum
 
   setMemory :: Word32 -> Word32 -> State Machine ()
-  setMemory a d = state (\s -> ((), s {memory = writeMem (memory s) a d}))
+  setMemory a d = modify $ \s -> s {memory = writeMem a d $ memory s}
 
   setRegister :: Register -> Word32 -> State Machine ()
-  setRegister r d = state (\s -> 
-    ((), s {rf = writeMem (rf s) ((fromIntegral . fromEnum) r) d}))
+  setRegister r d = modify $ \s -> 
+    s {rf = writeMem ((fromIntegral . fromEnum) r) d $ rf s}
