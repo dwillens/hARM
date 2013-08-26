@@ -8,6 +8,7 @@ module ARM.Simulator (simulate) where
   import Data.Int
   import Data.Maybe
   import Data.Word
+  import System.IO
 
   import Debug.Trace
   import Text.Printf
@@ -40,8 +41,8 @@ module ARM.Simulator (simulate) where
   rfSize :: (Integral a) => a
   rfSize = 16
 
-  initialize :: [Word32] -> Machine -> Machine
-  initialize program s =
+  initialize :: Machine -> [Word32] -> Machine
+  initialize s program =
     s {memory = foldr (uncurry writeMem) (memory s) $ zip [0,4..] program}
 
   reset :: Machine
@@ -57,38 +58,37 @@ module ARM.Simulator (simulate) where
     }
   
   simulate :: [Word32] -> IO ()
-  simulate program = do
-    withAsync getChar $ (\a -> simulate' a $ initialize program reset)
-    where simulate' :: Async Char -> Machine -> IO ()
-          simulate' async machine = do
+  simulate program = simulate' $ initialize reset program 
+    where simulate' :: Machine -> IO ()
+          simulate' s = withAsync getChar (\a -> simulateAsync a s)
+          simulateAsync :: Async Char -> Machine -> IO ()
+          simulateAsync async machine = do
             let (action, machine') = runState execute machine
             case action of
               Nothing -> return ()
               Just (Left input) -> 
                 do asyncResult <- poll async
                    case asyncResult of
-                        Just (Right c) -> withAsync getChar $ (\a -> simulate' a $ input (Just c) machine')
+                        Just (Right c) -> simulate' $ input (Just c) machine'
                         Just (Left _) -> error "Couldn't get input"
-                        Nothing -> simulate' async $ input Nothing machine'
-                   
-              Just (Right output) -> do 
-                                        --traceShow output $ return ()
-                                        putChar output
-                                        simulate' async machine'
+                        Nothing -> simulateAsync async $ input Nothing machine'
+              Just (Right output) -> do putChar output
+                                        hFlush stdout
+                                        simulateAsync async machine'
 
   execute :: State Machine Action
-  execute = runUntil $ (== 0) . readMem 15 . rf
+  execute = runUntilDoneOrAction $ (== 0) . readMem 15 . rf
 
   type Action = Maybe (Either (Maybe Char -> Machine -> Machine) Char)
 
-  runUntil :: (Machine -> Bool) -> State Machine Action
-  runUntil p = do
+  runUntilDoneOrAction :: (Machine -> Bool) -> State Machine Action
+  runUntilDoneOrAction doneP = do
       action <- step
-      stop <- gets p
-      if stop 
+      done <- gets doneP
+      if done 
         then return Nothing
         else case action of
-                  Nothing -> runUntil p
+                  Nothing -> runUntilDoneOrAction doneP
                   otherwise -> return action
 
   
@@ -98,9 +98,9 @@ module ARM.Simulator (simulate) where
     let i = disassembleI ir
     (c, n, v, z) <- getFlags
     --r0 <- getRegister R0
-    --r8 <- getRegister R8
+    --r1 <- getRegister R1
     --sp <- getRegister R13
-    --traceShow (pc, i, c, n, v, z, sp, r0, r8) $ return ()
+    --traceShow (pc, i, c, n, v, z, sp, r0, r1) $ return ()
     if not $ condition i c n v z then return Nothing else
       case i of
         DP op _ s rd rn so ->
@@ -174,13 +174,11 @@ module ARM.Simulator (simulate) where
                                     then do modify $ \s -> s { input = Nothing }
                                             return Nothing
                                     else return Nothing
-                      16 -> do putOutputByte $ fromIntegral val
-                               return Nothing
+                      16 -> do putOutputByte $ fromIntegral val; return Nothing
                       otherwise -> return Nothing
-        0x00FF04 -> case shift of 
-                      0 -> do putOutputByte $ fromIntegral val
-                              return Nothing
-                      otherwise -> return Nothing
+        0x00FF04 -> if shift == 0 
+                      then do putOutputByte $ fromIntegral val; return Nothing
+                      else return Nothing
         otherwise -> do setMemory wordAddr $ old .|. (val `shiftL` shift)
                         return Nothing
 
