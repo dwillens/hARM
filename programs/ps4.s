@@ -37,7 +37,7 @@ main:
    B R14
 
 prompt:
-   .string "\n\nEnter two numbers: \n\0"
+   .string "Enter two numbers: \n\0"
 
 
 puts:
@@ -59,6 +59,11 @@ puts_loop:
 
 
 putchar:
+   MOV R1 #0x1000
+delay:
+   SUB S R1 R1 #1
+   B NE delay
+
    MOV R1 #0xFF00
    MOV R2 #0xA
 
