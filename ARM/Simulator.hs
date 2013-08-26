@@ -16,8 +16,8 @@ module ARM.Simulator (simulate) where
                          ,n :: Bool
                          ,c :: Bool
                          ,v :: Bool
-                         ,input :: String
-                         ,output :: String
+                         ,input :: Maybe Char
+                         ,output :: Maybe Char
                          }
     deriving (Show)
 
@@ -38,10 +38,9 @@ module ARM.Simulator (simulate) where
   rfSize :: (Integral a) => a
   rfSize = 16
 
-  initialize :: [Word32] -> String -> State Machine ()
-  initialize program input = modify $ \s -> 
-    s {memory = foldr (uncurry writeMem) (memory s) $ zip [0,4..] program
-      ,input = input}
+  initialize :: [Word32] -> Machine -> Machine
+  initialize program s =
+    s {memory = foldr (uncurry writeMem) (memory s) $ zip [0,4..] program}
 
   reset :: Machine
   reset = Machine 
@@ -51,109 +50,137 @@ module ARM.Simulator (simulate) where
     ,n = False
     ,c = False
     ,v = False
-    ,input = ""
-    ,output = ""
+    ,input = Nothing
+    ,output = Nothing
     }
   
   simulate :: [Word32] -> IO ()
-  simulate program = interact $ flip evalState reset . execute program
+  simulate program = simulate' $ initialize program reset
+    where simulate' :: Machine -> IO ()
+          simulate' machine = do
+            let (action, machine') = runState execute machine
+            case action of
+              Nothing -> return ()
+              Just (Left input) -> do c <- getChar
+                                      --traceShow c $ return ()
+                                      simulate' $ input c machine'
+              Just (Right output) -> do 
+                                        --traceShow output $ return ()
+                                        putChar output
+                                        simulate' machine'
 
-  execute :: [Word32] -> String -> State Machine String
-  execute program input = do
-    initialize program input 
-    runUntil $ (== 0) . readMem 15 . rf
-    gets output
+  execute :: State Machine Action
+  execute = runUntil $ (== 0) . readMem 15 . rf
 
-  runUntil :: (Machine -> Bool) -> State Machine ()
+  type Action = Maybe (Either (Char -> Machine -> Machine) Char)
+
+  runUntil :: (Machine -> Bool) -> State Machine Action
   runUntil p = do
-      step
-      stop <- gets p 
-      if stop then return () else runUntil p
+      action <- step
+      stop <- gets p
+      if stop 
+        then return Nothing
+        else case action of
+                  Nothing -> runUntil p
+                  otherwise -> return action
 
-  step :: State Machine ()
+  
+  step :: State Machine Action
   step = do
-    pc <- getRegister R15
-    ir <- getMemory pc
-    setRegister R15 (pc + 4)
+    (pc, ir) <- fetchInstruction
     let i = disassembleI ir
-    c <- gets c
-    n <- gets n
-    v <- gets v
-    z <- gets z
-    let ci = fromIntegral $ fromEnum c
+    (c, n, v, z) <- getFlags
     --r0 <- getRegister R0
     --r8 <- getRegister R8
     --sp <- getRegister R13
     --traceShow (pc, i, c, n, v, z, sp, r0, r8) $ return ()
-    if condition i c n v z then
+    if not $ condition i c n v z then return Nothing else
       case i of
-        DP op cc s rd rn so ->
+        DP op _ s rd rn so ->
           do op1 <- getRegister rn
              (op2, sc) <- getShifterOperand so
+             let ci = fromIntegral $ fromEnum c
              let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
              let n' = result > maxBound `div` 2
              let z' = result == 0
-             if s 
-              then modify $ \s -> s {c = c', n = n', v = v', z = z'}
-              else return ()
+             if s then setFlags (c', n', v', z') else return ()
              if wb then setRegister rd result else return ()
-        B cc lnk offsetStr ->
+             return Nothing
+        B _ lnk offsetStr ->
           do let offset = (read offsetStr :: Int32) `shiftL` 8 `shiftR` 8
              oldPC <- getRegister R15
              if lnk then setRegister R14 oldPC else return () 
-             let newPC = oldPC + fromIntegral offset
-             setRegister R15 $ newPC
-        MEM LDR cc sg sz rd rn dir (MEMI offset) -> 
+             setRegister R15 $ oldPC + fromIntegral offset
+             return Nothing
+        MEM op _ sg sz rd rn dir (MEMI offset) -> 
           do base <- getRegister rn
-             let addr = base + (fromIntegral offset)
+             let addr = base + fromIntegral offset
              let wordAddr = addr .&. complement 0x3
              let subWordAddr = addr .&. 0x3
-             let shift = fromIntegral (subWordAddr * 8)
-             case sz of
-              WORD -> 
-                do val <- getMemory wordAddr
-                   setRegister rd val
-              BYTE ->
-                do val <- case wordAddr of
-                            0x00FF00 -> case subWordAddr of
-                                          0x0 -> return 0x0F
-                                          0x2 -> liftM (flip shiftL 16) getInputByte
-                                          otherwise -> return 0x00
-                            0x00FF04 -> case subWordAddr of
-                                          0x0 -> getInputByte 
-                                          otherwise -> return 0x00
-                            otherwise -> getMemory wordAddr
-                   --traceShow ("LDR", addr, wordAddr, subWordAddr, val) $ return () 
-                   setRegister rd $ (val `shiftR` shift) .&. 0xFF
-        MEM STR cc sg sz rd rn dir (MEMI offset) -> 
-          do val <- getRegister rd
-             base <- getRegister rn
-             let addr = base + (fromIntegral offset)
-             let wordAddr = addr .&. complement 0x3
-             let subWordAddr = addr .&. 0x3
-             let shift = fromIntegral (subWordAddr * 8)
-             case sz of
-              WORD -> setMemory wordAddr val
-              BYTE -> do --traceShow ("STR", addr, wordAddr, subWordAddr, val) $ return ()
-                         oldVal <- getMemory wordAddr
-                         let old = oldVal .&. complement (0xFF `shiftL` shift)
-                         case wordAddr of
-                            0x00FF00 -> case subWordAddr of 
-                                              0x0 -> if val .&. 0xA /= 0 
-                                                      then do w <- getMemory 0x00FF00
-                                                              putOutputByte w
-                                                      else if val .&. 0x5 /= 0
-                                                            then advanceInput
-                                                            else return ()
-                                              0x2 -> setMemory 0x00FF00 val 
-                                              otherwise -> return ()
-                            0x00FF04 -> case subWordAddr of
-                                              0x0 -> setMemory 0x00FF00 val
-                                              otherwise -> return ()
-                            otherwise -> setMemory wordAddr $ old .|. (val `shiftL` shift)
+             let shift = fromIntegral $ subWordAddr * 8
+             execMem op sg sz rd wordAddr shift
         otherwise -> error $ show i
-      else return ()
-    return ()
+
+  execMem :: MemOpcode -> Signedness -> MemSize -> Register ->
+               Word32 ->  Int -> State Machine Action
+  execMem LDR _ WORD rd wordAddr _ =
+    do val <- getMemory wordAddr; setRegister rd val; return Nothing
+  execMem STR _ WORD rd wordAddr _ =
+    do val <- getRegister rd; setMemory wordAddr val; return Nothing
+
+  execMem LDR False BYTE rd wordAddr shift =
+    do curInput <- gets input
+       case (wordAddr, shift, curInput) of
+            (0x00FF00, 16, Nothing) -> 
+              do pc <- getRegister R15 
+                 setRegister R15 (pc - 4) 
+                 return $ Just $ Left (\c s -> s { input = Just c })
+            otherwise -> 
+              do val <- case wordAddr of 
+                             0x00FF00 -> case shift of 
+                                              0  -> return 0x0F
+                                              16 -> liftM (flip shiftL 16 . fromIntegral) getInputByte
+                                              otherwise -> return 0x00
+                             0x00FF04 -> case shift of
+                                              0 -> liftM fromIntegral getInputByte 
+                                              otherwise -> return 0x00
+                             otherwise -> getMemory wordAddr
+                 --traceShow ("LDR", wordAddr, shift, val) $ return () 
+                 setRegister rd $ (val `shiftR` shift) .&. 0xFF
+                 return Nothing
+
+  execMem STR False BYTE rd wordAddr shift = 
+    do val <- getRegister rd
+       --traceShow ("STR", wordAddr, shift, val) $ return () 
+       oldVal <- getMemory wordAddr 
+       let old = oldVal .&. complement (0xFF `shiftL` shift) 
+       case wordAddr of 
+        0x00FF00 -> case shift of 
+                      0  -> if val .&. 0xA /= 0 
+                              then do c <- gets output
+                                      modify $ \s -> s { output = Nothing }
+                                      case c of
+                                        Nothing -> error "No output"
+                                        Just c -> return $ Just $ Right $ c
+                              else if val .&. 0x5 /= 0 
+                                    then do modify $ \s -> s { input = Nothing }
+                                            return Nothing
+                                    else return Nothing
+                      16 -> do putOutputByte $ fromIntegral val
+                               return Nothing
+                      otherwise -> return Nothing
+        0x00FF04 -> case shift of 
+                      0 -> do putOutputByte $ fromIntegral val
+                              return Nothing
+                      otherwise -> return Nothing
+        otherwise -> do setMemory wordAddr $ old .|. (val `shiftL` shift)
+                        return Nothing
+
+  fetchInstruction :: State Machine (Word32, Word32)
+  fetchInstruction = do pc <- getRegister R15
+                        ir <- getMemory pc
+                        setRegister R15 (pc + 4)
+                        return (pc, ir)
 
   condition :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
   condition (DP _ cc _ _ _ _) = condition' cc
@@ -218,15 +245,21 @@ module ARM.Simulator (simulate) where
           b64 = fromIntegral b :: Int64
           c64 = fromIntegral c :: Int64
 
-  getInputByte :: State Machine Word32
-  getInputByte = gets $ fromIntegral . fromEnum . head . input
+  getFlags :: State Machine (Bool, Bool, Bool, Bool)
+  getFlags = gets $ \s -> (c s, n s, v s, z s)
 
-  advanceInput :: State Machine ()
-  advanceInput = modify $ \s -> s { input = tail $ input s }
+  setFlags :: (Bool, Bool, Bool, Bool) -> State Machine ()
+  setFlags (c', n', v', z') = modify $ \s -> s {c = c', n = n', v = v', z = z'}
 
-  putOutputByte :: Word32 -> State Machine ()
-  putOutputByte val = modify $ \s -> 
-    s { output = (output s ++ [toEnum $ fromIntegral val]) }
+  getInputByte :: State Machine Word8
+  getInputByte = gets $ fromIntegral . fromEnum . check . input
+    where check :: Maybe Char -> Char
+          check (Just c) = c
+          check _ = error "No input"
+
+  putOutputByte :: Word8 -> State Machine ()
+  putOutputByte val = 
+    modify $ \s -> s { output = Just $ toEnum $ fromIntegral val }
 
   getShifterOperand :: ShifterOperand -> State Machine (Word32, Bool)
   getShifterOperand (IM rotate imm) = return
@@ -255,5 +288,5 @@ module ARM.Simulator (simulate) where
   setMemory a d = modify $ \s -> s {memory = writeMem a d $ memory s}
 
   setRegister :: Register -> Word32 -> State Machine ()
-  setRegister r d = modify $ \s -> 
-    s {rf = writeMem ((fromIntegral . fromEnum) r) d $ rf s}
+  setRegister rd d = modify $ \s -> s {rf = writeMem a d $ rf s}
+    where a = fromIntegral $ fromEnum rd
