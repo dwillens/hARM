@@ -2,3 +2,5 @@ Assemble
 Test_ARMAssembler
 Test_ARMParser
 Simulate
+trace
+
