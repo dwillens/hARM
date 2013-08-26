@@ -1,10 +1,12 @@
 module ARM.Simulator (simulate) where
   import ARM.Disassembler
   import ARM.InstructionSet as I
+  import Control.Concurrent.Async
   import Control.Monad.State
   import Data.Array
   import Data.Bits
   import Data.Int
+  import Data.Maybe
   import Data.Word
 
   import Debug.Trace
@@ -55,24 +57,29 @@ module ARM.Simulator (simulate) where
     }
   
   simulate :: [Word32] -> IO ()
-  simulate program = simulate' $ initialize program reset
-    where simulate' :: Machine -> IO ()
-          simulate' machine = do
+  simulate program = do
+    withAsync getChar $ (\a -> simulate' a $ initialize program reset)
+    where simulate' :: Async Char -> Machine -> IO ()
+          simulate' async machine = do
             let (action, machine') = runState execute machine
             case action of
               Nothing -> return ()
-              Just (Left input) -> do c <- getChar
-                                      --traceShow c $ return ()
-                                      simulate' $ input c machine'
+              Just (Left input) -> 
+                do asyncResult <- poll async
+                   case asyncResult of
+                        Just (Right c) -> withAsync getChar $ (\a -> simulate' a $ input (Just c) machine')
+                        Just (Left _) -> error "Couldn't get input"
+                        Nothing -> simulate' async $ input Nothing machine'
+                   
               Just (Right output) -> do 
                                         --traceShow output $ return ()
                                         putChar output
-                                        simulate' machine'
+                                        simulate' async machine'
 
   execute :: State Machine Action
   execute = runUntil $ (== 0) . readMem 15 . rf
 
-  type Action = Maybe (Either (Char -> Machine -> Machine) Char)
+  type Action = Maybe (Either (Maybe Char -> Machine -> Machine) Char)
 
   runUntil :: (Machine -> Bool) -> State Machine Action
   runUntil p = do
@@ -131,10 +138,11 @@ module ARM.Simulator (simulate) where
   execMem LDR False BYTE rd wordAddr shift =
     do curInput <- gets input
        case (wordAddr, shift, curInput) of
-            (0x00FF00, 16, Nothing) -> 
-              do pc <- getRegister R15 
-                 setRegister R15 (pc - 4) 
-                 return $ Just $ Left (\c s -> s { input = Just c })
+            (0x00FF00, 0, Nothing) -> 
+              do return $ Just $ Left (\mc s -> 
+                  case mc of
+                    Just c -> modRegister rd 0xF $ s { input = Just c }
+                    Nothing -> modRegister rd 0xA s)
             otherwise -> 
               do val <- case wordAddr of 
                              0x00FF00 -> case shift of 
@@ -252,10 +260,7 @@ module ARM.Simulator (simulate) where
   setFlags (c', n', v', z') = modify $ \s -> s {c = c', n = n', v = v', z = z'}
 
   getInputByte :: State Machine Word8
-  getInputByte = gets $ fromIntegral . fromEnum . check . input
-    where check :: Maybe Char -> Char
-          check (Just c) = c
-          check _ = error "No input"
+  getInputByte = gets $ fromIntegral . fromEnum . fromJust . input
 
   putOutputByte :: Word8 -> State Machine ()
   putOutputByte val = 
@@ -288,5 +293,8 @@ module ARM.Simulator (simulate) where
   setMemory a d = modify $ \s -> s {memory = writeMem a d $ memory s}
 
   setRegister :: Register -> Word32 -> State Machine ()
-  setRegister rd d = modify $ \s -> s {rf = writeMem a d $ rf s}
+  setRegister rd d = modify $ \s -> modRegister rd d s
+
+  modRegister :: Register -> Word32 -> Machine -> Machine
+  modRegister rd d m = m {rf = writeMem a d $ rf m}
     where a = fromIntegral $ fromEnum rd
