@@ -1,6 +1,8 @@
-Assemble
 Test_ARMAssembler
 Test_ARMParser
+Test_MIF
+Assemble
+Disassemble
 Simulate
 trace
 

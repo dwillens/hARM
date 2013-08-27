@@ -25,10 +25,10 @@ module ARM.Disassembler (disassemble, disassembleI) where
       0x2 -> MEM memOp cc False sz rd rn dir (MEMI imm12)
       0x3 -> 
         if enumField 4 0x1
-          then undefined
+          then dataString w
           else MEM memOp cc False sz rd rn dir (MEMR rm sh shAmt)
       0x5 -> B cc lnk bOffset
-      otherwise -> undefined
+      otherwise -> dataString w
     where enumField :: (Enum a) => Int -> Word32 -> a
           enumField = extractEnum w
           intField :: (Integral a) => Int -> Word32 -> a
@@ -59,3 +59,8 @@ module ARM.Disassembler (disassemble, disassembleI) where
 
   extract :: (Integral a) => Word32 -> Int -> Word32 -> a
   extract w s m = fromIntegral $ (.&. m) $ w `shiftR` s
+
+  dataString :: Word32 -> Instruction
+  dataString w = DataString s
+    where s = [toEnum $ fromIntegral $ w `shiftR` b .&. 0xFF | b <- [0,8..24]]
+

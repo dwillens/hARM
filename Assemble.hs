@@ -9,8 +9,8 @@ module Main where
   main = do
     (input:_) <- getArgs
     let (Just baseNameRev) = stripPrefix "s." . reverse $ input
-        output = reverse ("tuo." ++ baseNameRev)
+        output = reverse ("fim." ++ baseNameRev)
     contents <- readFile input
     let instructions = parseARM contents
         buffer = assemble instructions
-    writeFile output $ show $ MIF buffer
+    writeFile output $ showMIF buffer

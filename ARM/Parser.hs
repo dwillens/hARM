@@ -5,7 +5,6 @@ module ARM.Parser (parseARM) where
   import Data.List
   import Data.Word
   import Text.ParserCombinators.Parsec
-  import Text.ParserCombinators.Parsec.Expr
   import Text.ParserCombinators.Parsec.Language
   import qualified Text.ParserCombinators.Parsec.Token as Token
 
