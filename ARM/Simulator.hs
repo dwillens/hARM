@@ -177,14 +177,15 @@ module ARM.Simulator (simulate) where
     --traceShow (pc, i, c, n, v, z, sp, r0, r1, r8) $ return ()
     if not $ condition i c n v z 
       then return Continue 
-      else do a <- stepI i c n v z
+      else do a <- stepI i
               pc <- getRegister R15 
               return $ if pc == 0 then Stop else a
 
-  stepI :: Instruction -> Bool -> Bool -> Bool -> Bool -> State Machine Action
-  stepI (DP op _ s rd rn so) c n v z =
+  stepI :: Instruction -> State Machine Action
+  stepI (DP op _ s rd rn so) =
     do op1 <- getRegister rn
        (op2, sc) <- getShifterOperand so
+       (c, z, n, v) <- getFlags
        let ci = fromIntegral $ fromEnum c
        let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
        let n' = result > maxBound `div` 2
@@ -193,14 +194,14 @@ module ARM.Simulator (simulate) where
        if wb then setRegister rd result else return ()
        return Continue
 
-  stepI (B _ lnk offsetStr) _ _ _ _ =
+  stepI (B _ lnk offsetStr) =
     do let offset = (read offsetStr :: Int32) `shiftL` 8 `shiftR` 8
        oldPC <- getRegister R15
        if lnk then setRegister R14 oldPC else return () 
        setRegister R15 $ oldPC + fromIntegral offset
        return Continue
 
-  stepI (MEM op _ sg sz rd rn dir (MEMI offset)) _ _ _ _ =
+  stepI (MEM op _ sg sz rd rn dir (MEMI offset)) =
     do base <- getRegister rn
        let addr = base + fromIntegral offset
        let (shL, shR) = case sz of
@@ -212,7 +213,7 @@ module ARM.Simulator (simulate) where
         STR -> do word <- getRegister rd
                   return $ WriteMem addr sz word
 
-  stepI i _ _ _ _ = error $ show i
+  stepI i = error $ show i
 
   readComplete :: Register -> Signedness -> (Int, Int) -> Word32 -> 
                   State Machine ()
