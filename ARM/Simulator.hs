@@ -53,17 +53,26 @@ module ARM.Simulator (simulate) where
   busCycles bus machine = do
     let pc = evalState (getRegister R15) machine
     (bus', ir) <- busRead bus pc WORD
-    let machine' = flip execState machine $ do modify $ \s -> s {ir = ir} 
-                                               setRegister R15 (pc + 4)
-    let (action, machine'') = runState step machine'
+    let (action, machine') = 
+          flip runState machine $ do modify $ \s -> s {ir = ir}
+                                     setRegister R15 (pc + 4)
+                                     step
     case action of
       Stop -> return ()
-      Continue -> busCycles bus' machine''
-      ReadMem addr sz f -> do (bus'', val) <- busRead bus' addr sz
-                              let machine''' = execState (f val) machine''
-                              busCycles bus'' machine''' 
-      WriteMem addr sz val -> do bus' <- busWrite bus addr sz val 
-                                 busCycles bus' machine''
+      Continue -> busCycles bus' machine'
+      ReadMem rd addr sz sg -> 
+        do (bus'', val) <- busRead bus' addr sz 
+           let sh = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
+           let val' = if sg 
+                        then (val `shiftL` sh) `shiftR` sh 
+                        else let sVal = fromIntegral val :: Int32 
+                             in fromIntegral ((sVal `shiftL` sh) `shiftR` sh)
+           let machine'' = flip execState machine' $ setRegister rd val'
+           busCycles bus'' machine''
+      WriteMem rd addr sz -> 
+        do let val = flip evalState machine' $ getRegister rd 
+           bus' <- busWrite bus addr sz val 
+           busCycles bus' machine'
 
   data Device = IODevice (Async Char) (Maybe Char) (Maybe Char)
               | MemoryDevice (IOArray BusAddress Word32)
@@ -74,6 +83,18 @@ module ARM.Simulator (simulate) where
                              }
   type Bus = [BusDevice]
 
+
+
+  readComplete :: Register -> Signedness -> (Int, Int) -> Word32 -> 
+                  State Machine ()
+  readComplete rd sg (shL, shR) val =
+    let sVal :: Int32
+        sVal = fromIntegral val
+        val' :: Word32
+        val' = case sg of
+                    False -> (val `shiftL` shL) `shiftR` shR
+                    True -> fromIntegral ((sVal `shiftL` shL) `shiftR` shR)
+    in setRegister rd val'
 
   busRead :: Bus -> BusAddress -> MemSize -> IO (Bus, Word32)
   busRead (dev:devs) addr sz
@@ -161,20 +182,15 @@ module ARM.Simulator (simulate) where
 
   data Action = Stop
               | Continue
-              | ReadMem Word32 MemSize (Word32 -> State Machine ())
-              | WriteMem Word32 MemSize Word32 
+              | ReadMem Register BusAddress MemSize Signedness
+              | WriteMem Register BusAddress MemSize
 
   step :: State Machine Action
   step = do   
-    ir <- gets ir
-    let i = disassembleI ir
+    i <- liftM disassembleI $ gets ir
     (c, n, v, z) <- getFlags
-    --r0 <- getRegister R0
-    --r1 <- getRegister R1
-    --r8 <- getRegister R8
-    --sp <- getRegister R13
-    --pc <- getRegister R15
-    --traceShow (pc, i, c, n, v, z, sp, r0, r1, r8) $ return ()
+    --rf <- gets rf
+    --traceShow (i, c, n, v, z, rf) $ return ()
     if not $ condition i c n v z 
       then return Continue 
       else do a <- stepI i
@@ -190,8 +206,8 @@ module ARM.Simulator (simulate) where
        let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
        let n' = result > maxBound `div` 2
        let z' = result == 0
-       if s then setFlags (c', n', v', z') else return ()
-       if wb then setRegister rd result else return ()
+       when s $ setFlags (c', n', v', z')
+       when wb $ setRegister rd result
        return Continue
 
   stepI (B _ lnk offsetStr) =
@@ -204,28 +220,11 @@ module ARM.Simulator (simulate) where
   stepI (MEM op _ sg sz rd rn dir (MEMI offset)) =
     do base <- getRegister rn
        let addr = base + fromIntegral offset
-       let (shL, shR) = case sz of
-                             WORD -> (0, 0)
-                             HALF -> (16, 16)
-                             BYTE -> (24, 24)
        case op of 
-        LDR -> return $ ReadMem addr sz $ readComplete rd sg (shL, shR)
-        STR -> do word <- getRegister rd
-                  return $ WriteMem addr sz word
+        LDR -> return $ ReadMem rd addr sz sg 
+        STR -> return $ WriteMem rd addr sz
 
   stepI i = error $ show i
-
-  readComplete :: Register -> Signedness -> (Int, Int) -> Word32 -> 
-                  State Machine ()
-  readComplete rd sg (shL, shR) val =
-    let sVal :: Int32
-        sVal = fromIntegral val
-        val' :: Word32
-        val' = case sg of
-                    False -> (val `shiftL` shL) `shiftR` shR
-                    True -> fromIntegral ((sVal `shiftL` shL) `shiftR` shR)
-    in setRegister rd val'
-
 
   condition :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
   condition (DP _ cc _ _ _ _) = condition' cc
@@ -253,23 +252,23 @@ module ARM.Simulator (simulate) where
               (Bool, Word32, Bool, Bool)
   decodeDP AND a b c sc v = (True, a .&. b, sc, v)
   decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c sc v = (True, a - b, 
+  decodeDP SUB a b c _ _ = (True, a - b, 
                              not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP RSB a b c sc v = (True, b - a, 
+  decodeDP RSB a b c _ _ = (True, b - a, 
                              not $ carry (-a) b 0, overflow (-a) b 0)
-  decodeDP ADD a b c sc v = (True, a + b, carry a b 0, overflow a b 0)
-  decodeDP ADC a b c sc v = (True, a + b + c, carry a b c, overflow a b c)
-  decodeDP SBC a b c sc v = (True, a - b - nc, 
+  decodeDP ADD a b c _ _ = (True, a + b, carry a b 0, overflow a b 0)
+  decodeDP ADC a b c _ _ = (True, a + b + c, carry a b c, overflow a b c)
+  decodeDP SBC a b c _ _ = (True, a - b - nc, 
                              not $ carry a (-b) nc, overflow a (-b) nc)
     where nc = 1 - c
-  decodeDP RSC a b c sc v = (True, b - a - nc, 
+  decodeDP RSC a b c _ _ = (True, b - a - nc, 
                              not $ carry (-a) b nc, overflow (-a) b nc)
     where nc = 1 - c
   decodeDP TST a b c sc v = (False, a .&. b, sc, v)
   decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c sc v = (False, a - b, 
+  decodeDP CMP a b c _ _ = (False, a - b, 
                              not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP CMN a b c sc v = (False, a + b, carry a b 0, overflow a b 0)
+  decodeDP CMN a b c _ _ = (False, a + b, carry a b 0, overflow a b 0)
   decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
   decodeDP MOV a b c sc v = (True, b, sc, v)
   decodeDP BIC a b c sc v = (True, a .&. complement b, sc, v)
