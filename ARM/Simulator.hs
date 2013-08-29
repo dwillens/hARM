@@ -252,23 +252,23 @@ module ARM.Simulator (simulate) where
               (Bool, Word32, Bool, Bool)
   decodeDP AND a b c sc v = (True, a .&. b, sc, v)
   decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c _ _ = (True, a - b, 
+  decodeDP SUB a b c _  _ = (True, a - b, 
                              not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP RSB a b c _ _ = (True, b - a, 
+  decodeDP RSB a b c _  _ = (True, b - a, 
                              not $ carry (-a) b 0, overflow (-a) b 0)
-  decodeDP ADD a b c _ _ = (True, a + b, carry a b 0, overflow a b 0)
-  decodeDP ADC a b c _ _ = (True, a + b + c, carry a b c, overflow a b c)
-  decodeDP SBC a b c _ _ = (True, a - b - nc, 
+  decodeDP ADD a b c _  _ = (True, a + b, carry a b 0, overflow a b 0)
+  decodeDP ADC a b c _  _ = (True, a + b + c, carry a b c, overflow a b c)
+  decodeDP SBC a b c _  _ = (True, a - b - nc, 
                              not $ carry a (-b) nc, overflow a (-b) nc)
     where nc = 1 - c
-  decodeDP RSC a b c _ _ = (True, b - a - nc, 
+  decodeDP RSC a b c _  _ = (True, b - a - nc, 
                              not $ carry (-a) b nc, overflow (-a) b nc)
     where nc = 1 - c
   decodeDP TST a b c sc v = (False, a .&. b, sc, v)
   decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c _ _ = (False, a - b, 
+  decodeDP CMP a b c _  _ = (False, a - b, 
                              not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP CMN a b c _ _ = (False, a + b, carry a b 0, overflow a b 0)
+  decodeDP CMN a b c _  _ = (False, a + b, carry a b 0, overflow a b 0)
   decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
   decodeDP MOV a b c sc v = (True, b, sc, v)
   decodeDP BIC a b c sc v = (True, a .&. complement b, sc, v)
