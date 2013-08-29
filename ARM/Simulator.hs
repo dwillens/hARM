@@ -15,35 +15,21 @@ module ARM.Simulator (simulate) where
   import Debug.Trace
   import Text.Printf
 
-  data Machine = Machine {rf :: ArrayMemory
+  data Machine = Machine {rf :: Array Register Word32
+                         ,ir :: Word32
                          ,z :: Bool
                          ,n :: Bool
                          ,c :: Bool
                          ,v :: Bool
-                         ,ir :: Word32
                          }
     deriving (Show)
-
-  newtype ArrayMemory = ArrayMemory {mem :: Array Word32 Word32}
-    deriving (Show)
-
-  class Memory m where
-    readMem :: Word32 -> m -> Word32
-    writeMem :: Word32 -> Word32 -> m -> m
-
-  instance Memory ArrayMemory where
-    readMem d = (! d) . mem
-    writeMem a d = ArrayMemory . flip (//) [(a, d)] . mem
 
   memSize :: (Integral a) => a
   memSize = 0x80000
 
-  rfSize :: (Integral a) => a
-  rfSize = 16
-
   reset :: Machine
   reset = Machine 
-    {rf = ArrayMemory $ listArray (0, rfSize - 1) $ replicate rfSize 0 
+    {rf = listArray (minBound, maxBound) $ repeat 0 
     ,z = False
     ,n = False
     ,c = False
@@ -323,15 +309,13 @@ module ARM.Simulator (simulate) where
     return $ (val `op` (fromIntegral amt), False)
   getShifterOperand so = error $ show so
 
-  getMem :: (Memory m) => (Machine -> m) -> Word32 -> State Machine Word32
-  getMem m a = gets $ readMem a . m
-
   getRegister :: Register -> State Machine Word32
-  getRegister = getMem rf . fromIntegral . fromEnum
+  getRegister reg = gets $ \s -> rf s ! reg
 
   setRegister :: Register -> Word32 -> State Machine ()
-  setRegister rd d = modify $ \s -> modRegister rd d s
+  setRegister rd d = modify $ \s -> s {rf = rf s // [(rd, d)]}
 
-  modRegister :: Register -> Word32 -> Machine -> Machine
-  modRegister rd d m = m {rf = writeMem a d $ rf m}
-    where a = fromIntegral $ fromEnum rd
+  instance Ix Register where
+    range (r, s) = [r..s]
+    inRange (a, b) r = a <= r && r <= b
+    index (a, b) r = fromEnum r - fromEnum a
