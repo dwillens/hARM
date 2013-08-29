@@ -9,9 +9,12 @@ module ARM.InstructionSet (Instruction(..)
                           ,MemDir(..)
                           ,MemOffset(..)
                           ,Signedness
+                          ,BusAddress
                           ) where
   import Data.Word
 
+  type BusAddress = Word32
+  
   data Instruction = 
      DP           DPOpcode ConditionCode Bool Register Register ShifterOperand
    | MEM          MemOpcode ConditionCode Signedness MemSize Register Register 
