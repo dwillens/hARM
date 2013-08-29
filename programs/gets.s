@@ -30,7 +30,7 @@ gets_loop:
    B L getchar
    TEQ R0 #0xA
    MOV EQ R0 #0
-   STR R0 R8
+   STR BYTE R0 R8
    LDR EQ R8 R13 #0x4
    LDR EQ R14 R13
    ADD EQ R13 R13 #0x8
