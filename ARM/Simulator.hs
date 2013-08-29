@@ -40,7 +40,7 @@ module ARM.Simulator (simulate) where
   simulate :: [Word32] -> IO ()
   simulate program = 
     do bus <- createBus program
-       simulateBus bus reset
+       busCycles bus reset
 
   createBus :: [Word32] -> IO Bus
   createBus program = 
@@ -49,8 +49,8 @@ module ARM.Simulator (simulate) where
        return [BusDevice (IODevice as Nothing Nothing) 0xFF00 0xFF08
               ,BusDevice (MemoryDevice mem) 0x0 (memSize * 4)]
 
-  simulateBus :: Bus -> Machine -> IO ()
-  simulateBus bus machine = do
+  busCycles :: Bus -> Machine -> IO ()
+  busCycles bus machine = do
     let pc = evalState (getRegister R15) machine
     (bus', ir) <- busRead bus pc WORD
     let machine' = flip execState machine $ do modify $ \s -> s {ir = ir} 
@@ -58,12 +58,12 @@ module ARM.Simulator (simulate) where
     let (action, machine'') = runState step machine'
     case action of
       Stop -> return ()
-      Continue -> simulateBus bus' machine''
+      Continue -> busCycles bus' machine''
       ReadMem addr sz f -> do (bus'', val) <- busRead bus' addr sz
                               let machine''' = execState (f val) machine''
-                              simulateBus bus'' machine''' 
+                              busCycles bus'' machine''' 
       WriteMem addr sz val -> do bus' <- busWrite bus addr sz val 
-                                 simulateBus bus' machine''
+                                 busCycles bus' machine''
 
   data Device = IODevice (Async Char) (Maybe Char) (Maybe Char)
               | MemoryDevice (IOArray BusAddress Word32)
