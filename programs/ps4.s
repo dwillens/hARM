@@ -8,7 +8,7 @@
 _init:
    MOV R13 #0x8000
    B L main
-   B _init
+   SWI #-1
 
 main:
    SUB R13 R13 #0x8
