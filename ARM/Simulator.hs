@@ -84,18 +84,7 @@ module ARM.Simulator (simulate) where
 
   dropBits :: (Bits a) => Int -> a -> a
   dropBits sh val = (val `shiftL` sh) `shiftR` sh
-
-  readComplete :: Register -> Signedness -> (Int, Int) -> Word32 -> 
-                  State Machine ()
-  readComplete rd sg (shL, shR) val =
-    let sVal :: Int32
-        sVal = fromIntegral val
-        val' :: Word32
-        val' = case sg of
-                    False -> (val `shiftL` shL) `shiftR` shR
-                    True -> fromIntegral ((sVal `shiftL` shL) `shiftR` shR)
-    in setRegister rd val'
-
+  
   busRead :: Bus -> BusAddress -> MemSize -> IO (Bus, Word32)
   busRead (dev:devs) addr sz
     | addr >= busStart dev && addr < busEnd dev = 
