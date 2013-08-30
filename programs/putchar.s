@@ -5,14 +5,16 @@
  */
 
 main:
-   MOV R0 #65
+   MOV R0 #0x41
    B L putchar
-   B main
+   MOV R0 #0x0A
+   B L putchar
+   SWI #-1
 
 putchar:
    MOV R1 #0xFF00
    MOV R2 #0xA
-   
+
 putchar_loop:
    TST R2 #0xA
    B EQ R14

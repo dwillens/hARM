@@ -10,7 +10,7 @@
 _init:
    MOV R13 #0x8000
    B L main
-   B _init
+   SWI #-1
 
 main:
    SUB R13 R13 #0x4
@@ -20,6 +20,8 @@ main:
    ADD R0 R0 #0x0000FC00
    ADD R0 R0 #0x000000EA
    B L putint
+   MOV R0 #0xA
+   B L putchar
    LDR R14 R13
    B R14
 
