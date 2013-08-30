@@ -63,10 +63,10 @@ module ARM.Simulator (simulate) where
       ReadMem rd addr sz sg -> 
         do (bus'', val) <- busRead bus' addr sz 
            let sh = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
-           let val' = if sg 
-                        then (val `shiftL` sh) `shiftR` sh 
+           let val' = if sg
+                        then dropBits sh val
                         else let sVal = fromIntegral val :: Int32 
-                             in fromIntegral ((sVal `shiftL` sh) `shiftR` sh)
+                             in fromIntegral $ dropBits sh sVal
            let machine'' = flip execState machine' $ setRegister rd val'
            busCycles bus'' machine''
       WriteMem rd addr sz -> 
@@ -83,7 +83,8 @@ module ARM.Simulator (simulate) where
                              }
   type Bus = [BusDevice]
 
-
+  dropBits :: (Bits a) => Int -> a -> a
+  dropBits sh val = (val `shiftL` sh) `shiftR` sh
 
   readComplete :: Register -> Signedness -> (Int, Int) -> Word32 -> 
                   State Machine ()
@@ -189,8 +190,9 @@ module ARM.Simulator (simulate) where
   step = do   
     i <- liftM disassembleI $ gets ir
     (c, n, v, z) <- getFlags
+    --traceShow (i, c, n, v, z) $ return ()
     --rf <- gets rf
-    --traceShow (i, c, n, v, z, rf) $ return ()
+    --traceShow rf $ return ()
     if not $ condition i c n v z 
       then return Continue 
       else do a <- stepI i
@@ -213,7 +215,7 @@ module ARM.Simulator (simulate) where
   stepI (B _ lnk offsetStr) =
     do let offset = (read offsetStr :: Int32) `shiftL` 8 `shiftR` 8
        oldPC <- getRegister R15
-       if lnk then setRegister R14 oldPC else return () 
+       when lnk $ setRegister R14 oldPC
        setRegister R15 $ oldPC + fromIntegral offset
        return Continue
 
@@ -249,7 +251,7 @@ module ARM.Simulator (simulate) where
   condition'   AL _ _ _ _ = True
 
   alu :: DPOpcode -> Word32 -> Word32 -> Word32 -> Bool -> Bool -> 
-              (Bool, Word32, Bool, Bool)
+         (Bool, Word32, Bool, Bool)
   alu AND a b c sc v = (True, a .&. b, sc, v)
   alu EOR a b c sc v = (True, a `xor` b, sc, v)
   alu SUB a b c _  _ = (True, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
