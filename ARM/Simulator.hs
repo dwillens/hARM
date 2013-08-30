@@ -203,7 +203,7 @@ module ARM.Simulator (simulate) where
        (op2, sc) <- getShifterOperand so
        (c, z, n, v) <- getFlags
        let ci = fromIntegral $ fromEnum c
-       let (wb, result, c', v') = decodeDP op op1 op2 ci sc v
+       let (wb, result, c', v') = alu op op1 op2 ci sc v
        let n' = result > maxBound `div` 2
        let z' = result == 0
        when s $ setFlags (c', n', v', z')
@@ -248,31 +248,26 @@ module ARM.Simulator (simulate) where
   condition'   LE _ n v z = n /= v || z
   condition'   AL _ _ _ _ = True
 
-  decodeDP :: DPOpcode -> Word32 -> Word32 -> Word32 -> Bool -> Bool -> 
+  alu :: DPOpcode -> Word32 -> Word32 -> Word32 -> Bool -> Bool -> 
               (Bool, Word32, Bool, Bool)
-  decodeDP AND a b c sc v = (True, a .&. b, sc, v)
-  decodeDP EOR a b c sc v = (True, a `xor` b, sc, v)
-  decodeDP SUB a b c _  _ = (True, a - b, 
-                             not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP RSB a b c _  _ = (True, b - a, 
-                             not $ carry (-a) b 0, overflow (-a) b 0)
-  decodeDP ADD a b c _  _ = (True, a + b, carry a b 0, overflow a b 0)
-  decodeDP ADC a b c _  _ = (True, a + b + c, carry a b c, overflow a b c)
-  decodeDP SBC a b c _  _ = (True, a - b - nc, 
-                             not $ carry a (-b) nc, overflow a (-b) nc)
-    where nc = 1 - c
-  decodeDP RSC a b c _  _ = (True, b - a - nc, 
-                             not $ carry (-a) b nc, overflow (-a) b nc)
-    where nc = 1 - c
-  decodeDP TST a b c sc v = (False, a .&. b, sc, v)
-  decodeDP TEQ a b c sc v = (False, a `xor` b, sc, v) 
-  decodeDP CMP a b c _  _ = (False, a - b, 
-                             not $ carry a (-b) 0, overflow a (-b) 0)
-  decodeDP CMN a b c _  _ = (False, a + b, carry a b 0, overflow a b 0)
-  decodeDP ORR a b c sc v = (True, a .|. b, sc, v)
-  decodeDP MOV a b c sc v = (True, b, sc, v)
-  decodeDP BIC a b c sc v = (True, a .&. complement b, sc, v)
-  decodeDP MVN a b c sc v = (True, complement b, sc, v)
+  alu AND a b c sc v = (True, a .&. b, sc, v)
+  alu EOR a b c sc v = (True, a `xor` b, sc, v)
+  alu SUB a b c _  _ = (True, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
+  alu RSB a b c _  _ = (True, b - a, not $ carry (-a) b 0, overflow (-a) b 0)
+  alu ADD a b c _  _ = (True, a + b, carry a b 0, overflow a b 0)
+  alu ADC a b c _  _ = (True, a + b + c, carry a b c, overflow a b c)
+  alu SBC a b c _  _ = let nc = 1 - c
+    in (True, a - b - nc, not $ carry a (-b) nc, overflow a (-b) nc)
+  alu RSC a b c _  _ = let nc = 1 - c
+    in (True, b - a - nc, not $ carry (-a) b nc, overflow (-a) b nc)
+  alu TST a b c sc v = (False, a .&. b, sc, v)
+  alu TEQ a b c sc v = (False, a `xor` b, sc, v) 
+  alu CMP a b c _  _ = (False, a - b, not $ carry a (-b) 0, overflow a (-b) 0)
+  alu CMN a b c _  _ = (False, a + b, carry a b 0, overflow a b 0)
+  alu ORR a b c sc v = (True, a .|. b, sc, v)
+  alu MOV a b c sc v = (True, b, sc, v)
+  alu BIC a b c sc v = (True, a .&. complement b, sc, v)
+  alu MVN a b c sc v = (True, complement b, sc, v)
 
   carry :: Word32 -> Word32 -> Word32 -> Bool
   carry a b c = a64 + b64 + c64 > fromIntegral (maxBound :: Word32)
