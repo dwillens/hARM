@@ -39,7 +39,8 @@ module ARM.Simulator (simulate) where
   
   simulate :: [Word32] -> IO ()
   simulate program = 
-    do bus <- makeBus program
+    do hSetBuffering stdin NoBuffering
+       bus <- makeBus program
        busCycles bus reset
 
   makeBus :: [Word32] -> IO Bus
