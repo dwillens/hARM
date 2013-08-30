@@ -132,15 +132,12 @@ module ARM.Simulator (simulate) where
     (io'', d2) <- devRead io' 2 BYTE
     return (io'', d2 `shiftL` 16 .|. d0)
 
-  devRead (MemoryDevice m) addr WORD
-    | addr `mod` 4 == 0 = do val <- readArray m (addr `div` 4)
-                             return (MemoryDevice m, val)
-    | otherwise = error $ "Unaligned word read at " ++ show addr
+  devRead (MemoryDevice m) addr WORD = do val <- readArray m (addr `div` 4)
+                                          return (MemoryDevice m, val)
 
   devRead (MemoryDevice m) addr BYTE =
     do val <- readArray m (addr `div` 4)
        let shift = fromIntegral $ (addr `mod` 4) * 8
-       --traceShow (addr, (printf "%08x" val :: String), shift, (val `shiftR` shift) .&. 0xFF) $ return ()
        return (MemoryDevice m, (val `shiftR` shift) .&. 0xFF)
 
   devWrite :: Device -> BusAddress -> MemSize -> Word32 -> IO Device
@@ -161,10 +158,8 @@ module ARM.Simulator (simulate) where
   devWrite io@(IODevice as input _) 4 BYTE val =
     return $ IODevice as input $ Just $ toEnum $ fromIntegral val
 
-  devWrite (MemoryDevice m) addr WORD val
-    | addr `mod` 4 == 0 = do writeArray m (addr `div` 4) val
-                             return $ MemoryDevice m
-    | otherwise = error $ "Unaligned word write at " ++ show addr
+  devWrite (MemoryDevice m) addr WORD val = do writeArray m (addr `div` 4) val
+                                               return $ MemoryDevice m
 
   devWrite (MemoryDevice m) addr BYTE val =
     do old <- readArray m (addr `div` 4)
