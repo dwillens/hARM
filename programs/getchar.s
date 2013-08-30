@@ -7,7 +7,13 @@
 
 main:
    B L getchar
-   MOV R4 R0
+   MOV R8 R0
+   MOV R0 #0xA   
+   B L putchar
+   MOV R0 R8
+   B L putchar
+   MOV R0 #0xA   
+   B L putchar
    B main
 
 getchar:
@@ -26,3 +32,27 @@ getchar_loop:
    STR NE BYTE R2 R1
    B NE R14
    B getchar_loop
+
+putchar:
+   MOV R1 #0xFF00
+   MOV R2 #0xA
+
+putchar_loop:
+   TST R2 #0xA
+   B EQ R14
+
+   LDR BYTE R3 R1
+   AND R3 R3 R2
+   TST R3 #0x2
+   STR NE BYTE R0 R1 #0x2
+   MOV NE R0 #0x2
+   STR NE BYTE R0 R1 #0x0
+   BIC NE R2 R2 #0x2
+
+   TST R3 #0x8
+   STR NE BYTE R0 R1 #0x4
+   MOV NE R0 #0x8
+   STR NE BYTE R0 R1 #0x0
+   BIC NE R2 R2 #0x8
+
+   B putchar_loop
