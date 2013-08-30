@@ -88,8 +88,7 @@ module ARM.Simulator (simulate) where
 
   busRead :: Bus -> BusAddress -> MemSize -> IO (Bus, Word32)
   busRead (dev:devs) addr sz
-    | (sz == HALF && addr `mod` 2 /= 0) || (sz == WORD && addr `mod` 4 /= 0) = 
-        error $ "Unaligned read " ++ show (addr, sz)
+    | not $ aligned sz addr = error $ "Unaligned read " ++ show (addr, sz)
     | addr >= busStart dev && addr < busEnd dev = 
         do (dev', val) <- devRead (device dev) (addr - busStart dev) sz
            return (dev {device = dev'}:devs, val)
@@ -99,14 +98,18 @@ module ARM.Simulator (simulate) where
 
   busWrite :: Bus -> Word32 -> MemSize -> Word32 -> IO Bus
   busWrite (dev:devs) addr sz val
-    | (sz == HALF && addr `mod` 2 /= 0) || (sz == WORD && addr `mod` 4 /= 0) = 
-        error $ "Unaligned write " ++ show (addr, sz)
+    | not $ aligned sz addr = error $ "Unaligned write " ++ show (addr, sz)
     | addr >= busStart dev && addr < busEnd dev = 
         do dev' <- devWrite (device dev) (addr - busStart dev) sz val
            return $ dev {device = dev'}:devs
     | otherwise = 
         do devs' <- busWrite devs addr sz val
            return $ dev:devs'
+
+  aligned :: MemSize -> BusAddress -> Bool
+  aligned WORD = (0 ==) . (`mod` 4)
+  aligned HALF = (0 ==) . (`mod` 2)
+  aligned BYTE = cons
 
   devRead :: Device -> BusAddress -> MemSize -> IO (Device, Word32)
   devRead io@(IODevice as input output) 0 BYTE = 
