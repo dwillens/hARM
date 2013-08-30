@@ -58,11 +58,15 @@ module Main where
           ,I.Label "world" (DataString "EFGH")])
         ]
 
+  swi = [([0xEFFFFFFF], [SWI AL (-1)])
+        ,([0xEF000001], [SWI AL 1])
+        ]
+
   main = runTestTT $ TestList $ [testAssembler, testDisassembler]
 
 
   testAssembler :: Test
-  testAssembler = TestList $ map (uncurry test) (dp ++ mem ++ branch ++ str)
+  testAssembler = TestList $ map (uncurry test) (dp ++ mem ++ branch ++ str ++ swi)
     where test :: [Word32] -> [Instruction] -> Test
           test ws is = TestCase $ assertEqual (name ws is) ws $ assemble is
           name :: [Word32] -> [Instruction] -> String

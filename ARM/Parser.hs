@@ -14,16 +14,14 @@ module ARM.Parser (parseARM) where
                           Right is -> is
 
   armReserved = 
-    let dpOps, bOps, pseudoOps, memOps, ccs, regs, shifts, flags :: [String]
-        dpOps = map show ([minBound..maxBound] :: [DPOpcode])
+    let ops, ccs, regs, shifts, flags :: [String]
         ccs = map show ([minBound..maxBound] :: [ConditionCode]) ++ ["HS", "LO"]
         regs = map show ([minBound..maxBound] :: [Register])
         shifts = map show ([minBound..maxBound] :: [Shift])
         flags = ["S", "L"]
-        pseudoOps = [".la", ".string"]
-        bOps = ["B"]
-        memOps = ["LDR", "STR"]
-    in dpOps ++ bOps ++ memOps ++ pseudoOps ++ ccs ++ regs ++ shifts ++ flags
+        ops = map show ([minBound..maxBound] :: [DPOpcode]) ++
+              ["B", "LDR", "STR", "SWI", ".la", ".string"]
+    in ops ++ ccs ++ regs ++ shifts ++ flags
 
 
   armDef = emptyDef {Token.commentStart      = "/*"
@@ -54,7 +52,14 @@ module ARM.Parser (parseARM) where
     <|> memInstruction
     <|> loadAddressInstruction
     <|> dataStringInstruction
+    <|> swiInstruction
     <|> (do l <- identifier; colon; i <- instruction; return $ Label l i)
+
+  swiInstruction :: Parser Instruction
+  swiInstruction = do reserved "SWI"
+                      cc <- option AL conditionCode
+                      immed24 <- constant
+                      return $ SWI cc immed24
 
   dataStringInstruction :: Parser Instruction
   dataStringInstruction = do reserved ".string"

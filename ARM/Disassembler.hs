@@ -28,6 +28,9 @@ module ARM.Disassembler (disassemble, disassembleI) where
           then dataString w
           else MEM memOp cc False sz rd rn dir (MEMR rm sh shAmt)
       0x5 -> B cc lnk bOffset
+      0x7 -> if enumField 24 0x1
+              then SWI cc imm24
+              else dataString w
       otherwise -> dataString w
     where enumField :: (Enum a) => Int -> Word32 -> a
           enumField = extractEnum w
@@ -53,6 +56,7 @@ module ARM.Disassembler (disassemble, disassembleI) where
           miscImm = fromIntegral ((w .&. 0xF00) `shiftR` 4) .|. intField 0 0xF
           lnk = enumField 24 0x1
           bOffset = printf "0x%06X" $ (intField 0 0xFFFFFF :: Word32)
+          imm24 = enumField 0 0xFFFFFF
 
   extractEnum :: (Enum a) => Word32 -> Int -> Word32 -> a
   extractEnum w s m = toEnum $ extract w s m

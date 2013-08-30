@@ -85,7 +85,7 @@ module ARM.Simulator (simulate) where
 
   dropBits :: (Bits a) => Int -> a -> a
   dropBits sh val = (val `shiftL` sh) `shiftR` sh
-  
+
   busRead :: Bus -> BusAddress -> MemSize -> IO (Bus, Word32)
   busRead (dev:devs) addr sz
     | addr >= busStart dev && addr < busEnd dev = 
@@ -184,9 +184,7 @@ module ARM.Simulator (simulate) where
     --traceShow rf $ return ()
     if not $ condition i c n v z 
       then return Continue 
-      else do a <- stepI i
-              pc <- getRegister R15 
-              return $ if pc == 0 then Stop else a
+      else stepI i
 
   stepI :: Instruction -> State Machine Action
   stepI (DP op _ s rd rn so) =
@@ -215,12 +213,16 @@ module ARM.Simulator (simulate) where
         LDR -> return $ ReadMem rd addr sz sg 
         STR -> return $ WriteMem rd addr sz
 
+  stepI (SWI _ immed24) = 
+    if immed24 == 0x00FFFFFF then return Stop else return Continue
+
   stepI i = error $ show i
 
   condition :: Instruction -> Bool -> Bool -> Bool -> Bool -> Bool
   condition (DP _ cc _ _ _ _) = condition' cc
   condition (B cc _ _) = condition' cc
   condition (MEM _ cc _ _ _ _ _ _) = condition' cc
+  condition (SWI cc _) = condition' cc
 
   condition' :: ConditionCode -> Bool -> Bool -> Bool -> Bool -> Bool
   condition' I.EQ _ _ _ z = z

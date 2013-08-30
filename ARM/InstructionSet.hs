@@ -14,12 +14,13 @@ module ARM.InstructionSet (Instruction(..)
   import Data.Word
 
   type BusAddress = Word32
-  
+
   data Instruction = 
      DP           DPOpcode ConditionCode Bool Register Register ShifterOperand
    | MEM          MemOpcode ConditionCode Signedness MemSize Register Register 
                   MemDir MemOffset
    | B            ConditionCode Bool Label
+   | SWI          ConditionCode Word32
    | Label        Label Instruction
    | DataString   String
    | LoadAddress  Register Label

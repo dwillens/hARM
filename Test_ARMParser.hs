@@ -42,11 +42,13 @@ module Main where
     ,([MEM STR MI True BYTE R8 R2 UP (MEMR R4 ROR 17)], 
       "STR MI S BYTE R8 R2 R4 ROR #17")
 
-
     ,([DP ADD AL False R0 R1 (SI R2 LSL 0)], "ADD AL R0 R1 R2 // comment")
     ,([DP ADD AL False R0 R1 (SI R2 LSL 0)], "ADD AL /* always */ R0 R1 R2")
 
     ,([LoadAddress R5 "blah"], ".la R5 blah")
+
+    ,([SWI AL (-1)], "SWI #-1")
+    ,([SWI ARM.EQ 1], "SWI EQ #1")
     ]
 
   main = runTestTT $ TestList $ map test instructions

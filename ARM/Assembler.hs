@@ -81,6 +81,8 @@ module ARM.Assembler (assemble) where
     | otherwise       = error $ "Label not found: " ++ l
     where offset (Just t) = intField 0 0xFFFFFF $ t - addr - 4
 
+  assembleI _ _ (SWI cc immed24) =
+    [enumField 28 0xF cc .|. 0x0F000000 .|. (immed24 .&. 0x00FFFFFF)]
 
   assembleI ls addr (Label l i) = assembleI ls addr i
 
