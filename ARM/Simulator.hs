@@ -39,13 +39,13 @@ module ARM.Simulator (simulate) where
   
   simulate :: [Word32] -> IO ()
   simulate program = 
-    do bus <- createBus program
+    do bus <- makeBus program
        busCycles bus reset
 
-  createBus :: [Word32] -> IO Bus
-  createBus program = 
+  makeBus :: [Word32] -> IO Bus
+  makeBus program = 
     do as <- async getChar
-       mem <- newListArray (0, memSize) $ take memSize $ program ++ repeat 0
+       mem <- newListArray (0, memSize) $ program ++ repeat 0
        return [BusDevice (IODevice as Nothing Nothing) 0xFF00 0xFF08
               ,BusDevice (MemoryDevice mem) 0x0 (memSize * 4)]
 
@@ -62,17 +62,16 @@ module ARM.Simulator (simulate) where
       Continue -> busCycles bus' machine'
       ReadMem rd addr sz sg -> 
         do (bus'', val) <- busRead bus' addr sz 
-           let sh = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
-           let val' = if sg
-                        then dropBits sh val
-                        else let sVal = fromIntegral val :: Int32 
-                             in fromIntegral $ dropBits sh sVal
+           let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
+           let val' = if sg then dropBits bits val
+                            else let sVal = fromIntegral val :: Int32 
+                                 in fromIntegral $ dropBits bits sVal
            let machine'' = flip execState machine' $ setRegister rd val'
            busCycles bus'' machine''
       WriteMem rd addr sz -> 
         do let val = flip evalState machine' $ getRegister rd 
-           bus' <- busWrite bus addr sz val 
-           busCycles bus' machine'
+           bus'' <- busWrite bus' addr sz val 
+           busCycles bus'' machine'
 
   data Device = IODevice (Async Char) (Maybe Char) (Maybe Char)
               | MemoryDevice (IOArray BusAddress Word32)
