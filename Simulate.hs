@@ -1,5 +1,5 @@
 module Main where
-  import ARM.Simulator
+  import ARM.Simulator.Text
   import ARM.Assembler
   import ARM.Parser
   import Data.List

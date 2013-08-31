@@ -50,9 +50,9 @@ module ARM.Parser (parseARM) where
         dataProcessingInstruction
     <|> branchInstruction 
     <|> memInstruction
+    <|> swiInstruction
     <|> loadAddressInstruction
     <|> dataStringInstruction
-    <|> swiInstruction
     <|> (do l <- identifier; colon; i <- instruction; return $ Label l i)
 
   swiInstruction :: Parser Instruction
