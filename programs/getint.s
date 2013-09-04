@@ -55,10 +55,10 @@ getint:
    MOV R8 #0x0
    MOV R9 #0x0
 
-   B L getchar
+   B L getchar_echo
    CMP R0 #0x2D
    MOV EQ R9 #0x1
-   B EQ L getchar
+   B EQ L getchar_echo
 
 getint_loop:
    SUB S R0 R0 #0x30
@@ -72,7 +72,7 @@ getint_loop:
    ADD R8 R8 R1
    ADD R8 R8 R0
 
-   B L getchar
+   B L getchar_echo
    B getint_loop
 
 getint_exit:
@@ -86,6 +86,20 @@ getint_exit:
    ADD R13 R13 #0xC
    B R14
 
+getchar_echo:
+   SUB R13 R13 #0x8
+   STR R14 R13
+   STR R8 R13 #0x4
+
+   B L getchar
+   MOV R8 R0
+   B L putchar
+   MOV R0 R8
+
+   LDR R8 R13 #0x4
+   LDR R14 R13
+   ADD R13 R13 #0x8
+   B R14
 
 getchar:
    MOV R1 #0x00FF00

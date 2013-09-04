@@ -31,7 +31,7 @@ gets:
    MOV R8 R0
 
 gets_loop:
-   B L getchar
+   B L getchar_echo
    TEQ R0 #0xA
    MOV EQ R0 #0
    STR BYTE R0 R8
@@ -41,6 +41,22 @@ gets_loop:
    B EQ R14
    ADD R8 R8 #1
    B gets_loop
+
+
+getchar_echo:
+   SUB R13 R13 #0x8
+   STR R14 R13
+   STR R8 R13 #0x4
+
+   B L getchar
+   MOV R8 R0
+   B L putchar
+   MOV R0 R8
+
+   LDR R8 R13 #0x4
+   LDR R14 R13
+   ADD R13 R13 #0x8
+   B R14
 
 
 getchar:

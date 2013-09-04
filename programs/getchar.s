@@ -5,16 +5,29 @@
  *    architecture.
  */
 
+_init:
+   MOV R13 #0x8000
+   B L main
+   SWI #-1
+
 main:
+   B L getchar_echo
+   B main
+
+getchar_echo:
+   SUB R13 R13 #0x8
+   STR R14 R13
+   STR R8 R13 #0x4
+
    B L getchar
    MOV R8 R0
-   MOV R0 #0xA   
    B L putchar
    MOV R0 R8
-   B L putchar
-   MOV R0 #0xA   
-   B L putchar
-   B main
+
+   LDR R8 R13 #0x4
+   LDR R14 R13
+   ADD R13 R13 #0x8
+   B R14
 
 getchar:
    MOV R1 #0x00FF00
