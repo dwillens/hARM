@@ -4,5 +4,6 @@ Test_MIF
 Assemble
 Disassemble
 Simulate
+SimulateGloss
 trace
 

@@ -36,8 +36,10 @@ module ARM.Simulator.Common (Machine(..)
 
   data BusDevice =
     BusDevice {containsAddr :: BusAddress -> Bool
-              ,devRead :: BusAddress -> MemSize -> IO (Word32, BusDevice)
-              ,devWrite :: BusAddress -> MemSize -> Word32 -> IO BusDevice
+              ,devRead :: BusAddress -> MemSize -> String -> String -> 
+                          IO (Word32, BusDevice, String, String)
+              ,devWrite :: BusAddress -> MemSize -> Word32 -> 
+                            String -> String -> IO (BusDevice, String, String)
               }
 
   data MemoryDevice = MemoryDevice {memStart :: BusAddress
@@ -53,9 +55,6 @@ module ARM.Simulator.Common (Machine(..)
     range (r, s) = [r..s]
     inRange (a, b) r = a <= r && r <= b
     index (a, b) r = fromEnum r - fromEnum a
-
-  memSize :: (Integral a) => a
-  memSize = 0x200000
 
   reset :: Machine
   reset = Machine 
@@ -73,25 +72,27 @@ module ARM.Simulator.Common (Machine(..)
   setRegister :: Register -> Word32 -> State Machine ()
   setRegister rd d = modify $ \s -> s {rf = rf s // [(rd, d)]}
 
-  busRead :: Bus -> BusAddress -> MemSize -> IO (Word32, Bus)
-  busRead (dev:devs) addr sz
+  busRead :: Bus -> BusAddress -> MemSize -> String -> String -> 
+             IO (Word32, Bus, String, String)
+  busRead (dev:devs) addr sz input output
     | not $ aligned sz addr = error $ "Unaligned read " ++ show (addr, sz)
     | dev `containsAddr` addr =
-        do (val, dev') <- devRead dev addr sz
-           return (val, dev':devs)
+        do (val, dev', input', output') <- devRead dev addr sz input output
+           return (val, dev':devs, input', output')
     | otherwise = 
-        do (val, devs') <- busRead devs addr sz
-           return (val, dev:devs')
+        do (val, devs', input', output') <- busRead devs addr sz input output
+           return (val, dev:devs', input', output')
 
-  busWrite :: Bus -> Word32 -> MemSize -> Word32 -> IO Bus
-  busWrite (dev:devs) addr sz val
+  busWrite :: Bus -> Word32 -> MemSize -> Word32 -> String -> String-> 
+              IO (Bus, String, String)
+  busWrite (dev:devs) addr sz val input output
     | not $ aligned sz addr = error $ "Unaligned write " ++ show (addr, sz)
     | dev `containsAddr` addr = 
-        do dev' <- devWrite dev addr sz val
-           return $ dev':devs
+        do (dev', input', output') <- devWrite dev addr sz val input output
+           return $ (dev':devs, input', output')
     | otherwise = 
-        do devs' <- busWrite devs addr sz val
-           return $ dev:devs'
+        do (devs', input', output') <- busWrite devs addr sz val input output
+           return $ (dev:devs', input', output')
 
   aligned :: MemSize -> BusAddress -> Bool
   aligned WORD = (0 ==) . (`mod` 4)
@@ -221,19 +222,18 @@ module ARM.Simulator.Common (Machine(..)
     return $ (val `op` (fromIntegral amt), False)
   getShifterOperand so = error $ show so
 
-
   makeMemDevice :: MemoryDevice -> BusDevice
   makeMemDevice mem =
     BusDevice {containsAddr = \addr -> memStart mem <= addr &&
                                         addr < memStart mem - memLen mem
               ,devRead =
-                \addr sz ->
+                \addr sz input output ->
                   do (val, mem') <- memRead mem (addr - memStart mem) sz
-                     return (val, makeMemDevice mem')
+                     return (val, makeMemDevice mem', input, output)
               ,devWrite =
-                \addr sz val ->
+                \addr sz val input output ->
                   do mem' <- memWrite mem (addr - memStart mem) sz val
-                     return $ makeMemDevice mem'
+                     return $ (makeMemDevice mem', input, output)
               }
 
   memRead :: MemoryDevice -> BusAddress -> MemSize -> IO (Word32, MemoryDevice)
