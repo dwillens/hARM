@@ -27,9 +27,6 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
                      ,output :: String
                      }
 
-  memSize :: (Integral a) => a
-  memSize = 0x200000
-
   simulate :: [Word32] -> IO ()
   simulate program = do
     bus <- makeBus program
@@ -58,77 +55,6 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   handleEvent (EventKey (SpecialKey KeyEnter) Up _ _) w = return w {input = input w ++ "\n"}
   handleEvent _ w = return w
 
-  makeBus :: [Word32] -> IO Bus
-  makeBus program = do
-    mem <- newListArray (0, memSize `div` 4) $ program ++ repeat 0
-    return [makeIODevice $ IODevice 0xFF00 8 Nothing Nothing
-           ,makeMemDevice $ MemoryDevice 0x0 memSize mem
-           ]
-
-  data IODevice = IODevice {ioStart :: BusAddress
-                           ,ioLen :: BusAddress
-                           ,ioInput :: Maybe Char
-                           ,ioOutput :: Maybe Char
-                           }
-
-  makeIODevice :: IODevice -> BusDevice
-  makeIODevice io =
-    BusDevice {containsAddr = \addr -> ioStart io <= addr && 
-                                        addr < ioStart io + ioLen io
-              ,devRead = 
-                \addr sz i o-> 
-                  do (val, io', i', o') <- ioRead io (addr - ioStart io) sz i o
-                     return (val, makeIODevice io', i', o')
-              ,devWrite = 
-                \addr sz val input output -> do
-                  (dev', input', output') <- ioWrite io (addr - ioStart io) sz val input output
-                  return (makeIODevice dev', input', output')
-              }
-
-
-  ioRead :: IODevice -> BusAddress -> MemSize -> String -> String -> 
-            IO (Word32, IODevice, String, String)
-  ioRead io 0 BYTE busInput busOutput = 
-    case ioInput io of 
-         Just c -> return (0xF, io, busInput, busOutput) 
-         Nothing -> return $
-                      case busInput of 
-                           c:cs -> (0xF, io {ioInput = Just c}, cs, busOutput) 
-                           [] -> (0xA, io, busInput, busOutput)
-
-  ioRead io 2 BYTE i o = 
-    case ioInput io of 
-         Just c -> return (fromIntegral $ fromEnum c, io, i, o) 
-         Nothing -> error $ "No input available"
-
-  ioRead io 0 HALF i o = ioRead io 0 BYTE i o
-  ioRead io 2 HALF i o = ioRead io 2 BYTE i o
-
-  ioRead io 0 WORD i o = do (d0, io', i', o') <- ioRead io 0 BYTE i o
-                            (d2, io'', i'', o'') <- ioRead io' 2 BYTE i' o'
-                            return (d2 `shiftL` 16 .|. d0, io'', i'', o'')
-
-  ioWrite :: IODevice -> BusAddress -> MemSize -> Word32 -> String -> String ->
-             IO (IODevice, String, String)
-  ioWrite io@(IODevice start len input output) 0 BYTE val busInput busOutput =
-    let (output', busOutput') = if val .&. 0xA /= 0
-                                  then case output of 
-                                    Nothing -> error "No output character"
-                                    Just c -> (Nothing, busOutput ++ [c])
-                                  else (output, busOutput)
-        (input', busInput') = if val .&. 0x5 /= 0 
-                                then case busInput of
-                                          [] -> (Nothing, [])
-                                          c:cs -> (Just c, cs)
-                                else (input, busInput)
-    in return (io {ioInput = input', ioOutput = output'}, busInput', busOutput')
-
-  ioWrite io 2 BYTE val busInput busOutput =
-    return (io {ioOutput = Just $ toEnum $ fromIntegral val}, busInput, busOutput)
-  
-  ioWrite io 4 BYTE val busInput busOutput =
-    return (io {ioOutput = Just $ toEnum $ fromIntegral val}, busInput, busOutput)
-
   busCycle :: World -> IO World
   busCycle w = do
     do let tsc' = tsc w + 1
@@ -137,12 +63,11 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
        (ir, bus', input', output') <- busRead (bus w) pc WORD (input w) (output w)
        let machine'' = flip execState machine' $ do modify $ \s -> s {ir = ir}
                                                     setRegister R15 (pc + 4)
-
        case action of
          Stop -> return $ w {running = False, tsc = tsc'
                             ,bus = bus', machine = machine''}
          Continue -> return $ w {tsc = tsc', bus = bus', machine = machine''}
-         ReadMem rd addr sz sg -> 
+         ReadMem rd addr sz sg ->
            do (val, bus'', input'', output'') <- busRead bus' addr sz input' output'
               let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
               let val' = if sg then dropBits bits val
