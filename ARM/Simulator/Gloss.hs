@@ -23,8 +23,7 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
                      ,tsc :: Integer
                      ,bus :: Bus
                      ,machine :: Machine
-                     ,input :: String
-                     ,output :: String
+                     ,busIO :: (String, String)
                      }
 
   simulate :: [Word32] -> IO ()
@@ -33,8 +32,8 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
     let machine = reset
     playIO (InWindow "ARM" (1024,768) (100, 100))
            white
-           60
-           (World False 3.0 0.0 0 bus machine [] [])
+           600
+           (World False 3.0 0.0 0 bus machine ("", ""))
            draw
            handleEvent
            (\t w -> if running w
@@ -50,42 +49,18 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   handleEvent (EventKey (SpecialKey KeyF2) Up _ _) w = return w {initDelay = initDelay w / 2 }
   handleEvent (EventKey (SpecialKey KeyF3) Up _ _) w = return w {initDelay = initDelay w * 2}
   handleEvent (EventKey (SpecialKey KeyF8) Up _ _) w = busCycle w
-  handleEvent (EventKey (Char c) Up _ _) w = return w {input = input w ++ [c]}
-  handleEvent (EventKey (SpecialKey KeySpace) Up _ _) w = return w {input = input w ++ " "}
-  handleEvent (EventKey (SpecialKey KeyEnter) Up _ _) w = return w {input = input w ++ "\n"}
+  handleEvent (EventKey (Char c) Up _ _) w = execStateT (worldInput c) w
+  handleEvent (EventKey (SpecialKey KeySpace) Up _ _) w = execStateT (worldInput ' ') w
+  handleEvent (EventKey (SpecialKey KeyEnter) Up _ _) w = execStateT (worldInput '\n') w
   handleEvent _ w = return w
 
-  busCycle :: World -> IO World
-  busCycle w = do
-    do let tsc' = tsc w + 1
-       let (action, machine') = runState step $ machine w
-       let pc = evalState (getRegister R15) machine'
-       (ir, bus', input', output') <- busRead (bus w) pc WORD (input w) (output w)
-       let machine'' = flip execState machine' $ do modify $ \s -> s {ir = ir}
-                                                    setRegister R15 (pc + 4)
-       case action of
-         Stop -> return $ w {running = False, tsc = tsc'
-                            ,bus = bus', machine = machine''}
-         Continue -> return $ w {tsc = tsc', bus = bus', machine = machine''}
-         ReadMem rd addr sz sg ->
-           do (val, bus'', input'', output'') <- busRead bus' addr sz input' output'
-              let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
-              let val' = if sg then dropBits bits val
-                               else let sVal = fromIntegral val :: Int32 
-                                    in fromIntegral $ dropBits bits sVal
-              let machine''' = flip execState machine'' $ setRegister rd val'
-              return $ w {tsc = tsc', bus = bus'', machine = machine'''
-                         ,input = input'', output = output''}
-         WriteMem rd addr sz -> 
-           do let val = flip evalState machine'' $ getRegister rd 
-              (bus'', input', output') <- busWrite bus' addr sz val (input w) (output w)
-              return $ w {tsc = tsc', bus = bus'', machine = machine''
-                         ,input = input', output = output'}
-    where dropBits :: (Bits a) => Int -> a -> a
-          dropBits sh val = (val `shiftL` sh) `shiftR` sh
+  worldInput :: Char -> StateT World IO ()
+  worldInput c = do
+    (input, output) <- gets busIO
+    modify $ \w -> w {busIO = (input ++ [c], output)}
 
   draw :: World -> IO Picture
-  draw (World _ _ _ t b m i o) = return $ 
+  draw (World _ _ _ t b m (_, o)) = return $ 
     pictures [translate (-500.0) 350.0 $ color orange $ drawShow t
              ,translate (-500.0) 300.0 $ color green $ drawRF m 
              ,translate (-250.0) 300.0 $ color blue $ drawShow $ disassembleI $ ir m
@@ -109,3 +84,60 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
                         $ color black 
                         $ pictures [text $ show r
                                    ,translate 400.0 0 $ text $ printf "%08x" w]
+
+  worldRead :: BusAddress -> MemSize -> StateT World IO Word32
+  worldRead addr sz = do
+    bus <- gets bus
+    busIO <- gets busIO
+    ((val, bus'), busIO') <- lift $ flip runStateT busIO $ busRead bus addr sz
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+    return val
+
+  worldWrite :: BusAddress -> MemSize -> Word32 -> StateT World IO ()
+  worldWrite addr sz val = do
+    bus <- gets bus
+    busIO <- gets busIO
+    (bus', busIO') <- lift $ flip runStateT busIO $ busWrite bus addr sz val
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+
+  fetchAndStep :: StateT World IO Action
+  fetchAndStep = do
+    machine <- gets machine
+    let pc = flip evalState machine $ getRegister R15
+    ir <- worldRead pc WORD
+    let (action, machine') = 
+          flip runState machine $ do modify $ \s -> s {ir = ir}
+                                     setRegister R15 (pc + 4)
+                                     step
+    modify $ \w -> w {machine = machine'}
+    return action
+
+  execRead :: Register -> BusAddress -> MemSize -> Signedness ->
+             StateT World IO ()
+  execRead rd addr sz sg =
+    do val <- worldRead addr sz
+       let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
+       let val' = if sg then dropBits bits val
+                       else let sVal = fromIntegral val :: Int32 
+                            in fromIntegral $ dropBits bits sVal
+       machine <- gets machine
+       let machine' = flip execState machine $ setRegister rd val'
+       modify $ \w -> w {machine = machine'}
+       return ()
+    where dropBits :: (Bits a) => Int -> a -> a
+          dropBits sh val = (val `shiftL` sh) `shiftR` sh
+
+  execWrite :: Register -> BusAddress -> MemSize -> StateT World IO ()
+  execWrite rd addr sz = do
+    machine <- gets machine
+    let val = flip evalState machine $ getRegister rd 
+    worldWrite addr sz val
+
+  busCycle :: World -> IO World
+  busCycle = execStateT $ do
+    action <- fetchAndStep
+    case action of
+      Stop -> modify $ \w -> w {running = False}
+      Continue -> return ()
+      ReadMem rd addr sz sg -> execRead rd addr sz sg
+      WriteMem rd addr sz -> execWrite rd addr sz

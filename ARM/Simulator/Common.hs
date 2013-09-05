@@ -3,6 +3,7 @@ module ARM.Simulator.Common (Machine(..)
                             ,BusDevice(..)
                             ,MemoryDevice(..)
                             ,Action(..)
+                            ,BusIO
                             ,reset
                             ,getRegister
                             ,setRegister
@@ -34,14 +35,21 @@ module ARM.Simulator.Common (Machine(..)
 
 
   type Bus = [BusDevice]
+  type BusIO = (String, String)
 
   data BusDevice =
     BusDevice {containsAddr :: BusAddress -> Bool
-              ,devRead :: BusAddress -> MemSize -> String -> String -> 
-                          IO (Word32, BusDevice, String, String)
+              ,devRead :: BusAddress -> MemSize -> 
+                          StateT BusIO IO (Word32, BusDevice)
               ,devWrite :: BusAddress -> MemSize -> Word32 -> 
-                            String -> String -> IO (BusDevice, String, String)
+                           StateT BusIO IO BusDevice
               }
+
+  data IODevice = IODevice {ioStart :: BusAddress
+                           ,ioLen :: BusAddress
+                           ,ioInput :: Maybe Char
+                           ,ioOutput :: Maybe Char
+                           }
 
   data MemoryDevice = MemoryDevice {memStart :: BusAddress
                                    ,memLen :: BusAddress
@@ -78,27 +86,28 @@ module ARM.Simulator.Common (Machine(..)
   setRegister :: Register -> Word32 -> State Machine ()
   setRegister rd d = modify $ \s -> s {rf = rf s // [(rd, d)]}
 
-  busRead :: Bus -> BusAddress -> MemSize -> String -> String -> 
-             IO (Word32, Bus, String, String)
-  busRead (dev:devs) addr sz input output
-    | not $ aligned sz addr = error $ "Unaligned read " ++ show (addr, sz)
-    | dev `containsAddr` addr =
-        do (val, dev', input', output') <- devRead dev addr sz input output
-           return (val, dev':devs, input', output')
-    | otherwise = 
-        do (val, devs', input', output') <- busRead devs addr sz input output
-           return (val, dev:devs', input', output')
+  makeBus :: [Word32] -> IO Bus
+  makeBus program = 
+    do mem <- newListArray (0, memSize `div` 4) $ program ++ repeat 0
+       return [makeIODevice $ IODevice 0xFF00 8 Nothing Nothing
+              ,makeMemDevice $ MemoryDevice 0x0 memSize mem
+              ]
 
-  busWrite :: Bus -> Word32 -> MemSize -> Word32 -> String -> String-> 
-              IO (Bus, String, String)
-  busWrite (dev:devs) addr sz val input output
+  busRead :: Bus -> BusAddress -> MemSize -> StateT BusIO IO (Word32, Bus)
+  busRead (dev:devs) addr sz
+    | not $ aligned sz addr = error $ "Unaligned read " ++ show (addr, sz)
+    | dev `containsAddr` addr = do (val, dev') <- devRead dev addr sz
+                                   return (val, dev':devs)
+    | otherwise = do (val, devs') <- busRead devs addr sz
+                     return (val, dev:devs')
+
+  busWrite :: Bus -> Word32 -> MemSize -> Word32 -> StateT BusIO IO Bus
+  busWrite (dev:devs) addr sz val
     | not $ aligned sz addr = error $ "Unaligned write " ++ show (addr, sz)
-    | dev `containsAddr` addr = 
-        do (dev', input', output') <- devWrite dev addr sz val input output
-           return $ (dev':devs, input', output')
-    | otherwise = 
-        do (devs', input', output') <- busWrite devs addr sz val input output
-           return $ (dev:devs', input', output')
+    | dev `containsAddr` addr = do dev' <- devWrite dev addr sz val
+                                   return $ dev':devs
+    | otherwise = do devs' <- busWrite devs addr sz val
+                     return $ dev:devs'
 
   aligned :: MemSize -> BusAddress -> Bool
   aligned WORD = (0 ==) . (`mod` 4)
@@ -232,109 +241,98 @@ module ARM.Simulator.Common (Machine(..)
   makeMemDevice mem =
     BusDevice {containsAddr = \addr -> memStart mem <= addr &&
                                         addr < memStart mem - memLen mem
-              ,devRead =
-                \addr sz input output ->
-                  do (val, mem') <- memRead mem (addr - memStart mem) sz
-                     return (val, makeMemDevice mem', input, output)
-              ,devWrite =
-                \addr sz val input output ->
-                  do mem' <- memWrite mem (addr - memStart mem) sz val
-                     return $ (makeMemDevice mem', input, output)
+              ,devRead = \addr sz ->
+                do (val, mem') <- memRead mem (addr - memStart mem) sz
+                   return (val, makeMemDevice mem')
+              ,devWrite = \addr sz val ->
+                do mem' <- memWrite mem (addr - memStart mem) sz val
+                   return $ makeMemDevice mem'
               }
 
-  memRead :: MemoryDevice -> BusAddress -> MemSize -> IO (Word32, MemoryDevice)
-  memRead mem addr WORD = do
+
+  --ignoreStateT :: (Monad m) =>  m a -> StateT s m a
+  --ignoreStateT ma = state $ \s -> (ma, s)
+
+  memRead :: MemoryDevice -> BusAddress -> MemSize -> 
+             StateT BusIO IO (Word32, MemoryDevice)
+  memRead mem addr WORD = lift $ do
     val <- readArray (memory mem) $ addr `div` 4
     return (val, mem)
 
-  memRead mem addr BYTE = do
-    do val <- readArray (memory mem) (addr `div` 4)
-       let shift = fromIntegral $ (addr `mod` 4) * 8
-       return ((val `shiftR` shift) .&. 0xFF, mem)
+  memRead mem addr BYTE = lift $ do
+    val <- readArray (memory mem) (addr `div` 4)
+    let shift = fromIntegral $ (addr `mod` 4) * 8
+    return ((val `shiftR` shift) .&. 0xFF, mem)
 
-  memWrite :: MemoryDevice -> BusAddress -> MemSize -> Word32 -> IO MemoryDevice
-  memWrite mem addr WORD val = do
+  memWrite :: MemoryDevice -> BusAddress -> MemSize -> Word32 -> 
+              StateT BusIO IO MemoryDevice
+  memWrite mem addr WORD val = lift $ do
     writeArray (memory mem) (addr `div` 4) val
     return mem
 
-  memWrite mem addr BYTE val =
-    do old <- readArray (memory mem) (addr `div` 4)
-       let shift = flip shiftL $ fromIntegral $ (addr `mod` 4) * 8
-       let mask = shift 0xFF
-       let new = (old .&. complement mask) .|. (shift val .&. mask)
-       writeArray (memory mem) (addr `div` 4) new
-       return mem
-
-
-  data IODevice = IODevice {ioStart :: BusAddress
-                           ,ioLen :: BusAddress
-                           ,ioInput :: Maybe Char
-                           ,ioOutput :: Maybe Char
-                           }
-
-  makeBus :: [Word32] -> IO Bus
-  makeBus program = 
-    do mem <- newListArray (0, memSize `div` 4) $ program ++ repeat 0
-       return [makeIODevice $ IODevice 0xFF00 8 Nothing Nothing
-              ,makeMemDevice $ MemoryDevice 0x0 memSize mem
-              ]
+  memWrite mem addr BYTE val = lift $ do 
+    old <- readArray (memory mem) (addr `div` 4)
+    let shift = flip shiftL $ fromIntegral $ (addr `mod` 4) * 8
+    let mask = shift 0xFF
+    let new = (old .&. complement mask) .|. (shift val .&. mask)
+    writeArray (memory mem) (addr `div` 4) new
+    return mem
 
   makeIODevice :: IODevice -> BusDevice
   makeIODevice io =
     BusDevice {containsAddr = \addr -> ioStart io <= addr && 
                                         addr < ioStart io + ioLen io
-              ,devRead = 
-                \addr sz i o -> 
-                  do (val, io', i', o') <- ioRead io (addr - ioStart io) sz i o
-                     return (val, makeIODevice io', i', o')
-              ,devWrite = 
-                \addr sz val i o -> 
-                  do (io', i', o') <- ioWrite io (addr - ioStart io) sz val i o
-                     return (makeIODevice io', i', o')
-                  
+              ,devRead = \addr sz ->
+                do (val, io') <- ioRead io (addr - ioStart io) sz
+                   return (val, makeIODevice io')
+              ,devWrite = \addr sz val ->
+                do io' <- ioWrite io (addr - ioStart io) sz val
+                   return $ makeIODevice io'
               }
 
-
-  ioRead :: IODevice -> BusAddress -> MemSize -> String -> String -> 
-            IO (Word32, IODevice, String, String)
-  ioRead io 0 BYTE busInput busOutput = 
+  ioRead :: IODevice -> BusAddress -> MemSize -> 
+            StateT BusIO IO (Word32, IODevice)
+  ioRead io 0 BYTE = 
     case ioInput io of 
-         Just c -> return (0xF, io, busInput, busOutput) 
-         Nothing -> return $
-                      case busInput of 
-                           c:cs -> (0xF, io {ioInput = Just c}, cs, busOutput) 
-                           [] -> (0xA, io, busInput, busOutput)
+         Just c -> return (0xF, io) 
+         Nothing -> do (busInput, busOutput) <- get
+                       case busInput of 
+                            c:cs -> do put (cs, busOutput)
+                                       return (0xF, io {ioInput = Just c}) 
+                            [] -> return (0xA, io)
 
-  ioRead io 2 BYTE i o = 
+  ioRead io 2 BYTE = 
     case ioInput io of 
-         Just c -> return (fromIntegral $ fromEnum c, io, i, o) 
+         Just c -> return (fromIntegral $ fromEnum c, io) 
          Nothing -> error $ "No input available"
 
-  ioRead io 0 HALF i o = ioRead io 0 BYTE i o
-  ioRead io 2 HALF i o = ioRead io 2 BYTE i o
+  ioRead io 0 HALF = ioRead io 0 BYTE
+  ioRead io 2 HALF = ioRead io 2 BYTE
 
-  ioRead io 0 WORD i o = do (d0, io', i', o') <- ioRead io 0 BYTE i o
-                            (d2, io'', i'', o'') <- ioRead io' 2 BYTE i' o'
-                            return (d2 `shiftL` 16 .|. d0, io'', i'', o'')
+  ioRead io 0 WORD = do (d0, io') <- ioRead io 0 BYTE
+                        (d2, io'') <- ioRead io' 2 BYTE
+                        return (d2 `shiftL` 16 .|. d0, io'')
 
-  ioWrite :: IODevice -> BusAddress -> MemSize -> Word32 -> String -> String ->
-             IO (IODevice, String, String)
-  ioWrite io@(IODevice start len input output) 0 BYTE val busInput busOutput =
-    let (output', busOutput') = if val .&. 0xA /= 0
-                                  then case output of 
-                                    Nothing -> error "No output character"
-                                    Just c -> (Nothing, busOutput ++ [c])
-                                  else (output, busOutput)
-        (input', busInput') = if val .&. 0x5 /= 0 
-                                then case busInput of
-                                          [] -> (Nothing, [])
-                                          c:cs -> (Just c, cs)
-                                else (input, busInput)
-    in return (io {ioInput = input', ioOutput = output'}, busInput', busOutput')
+  ioWrite :: IODevice -> BusAddress -> MemSize -> Word32 ->
+             StateT BusIO IO IODevice
+  ioWrite io@(IODevice start len input output) 0 BYTE val =
+    do (busInput, busOutput) <- get
+       let (output', busOutput') = if val .&. 0xA /= 0
+                                    then case output of 
+                                              Nothing -> error "No output character"
+                                              Just c -> (Nothing, busOutput ++ [c])
+                                    else (output, busOutput)
+       let (input', busInput') = if val .&. 0x5 /= 0 
+                                   then case busInput of
+                                             [] -> (Nothing, [])
+                                             c:cs -> (Just c, cs)
+                                   else (input, busInput)
+       put (busInput', busOutput')
+       return io {ioInput = input', ioOutput = output'}
 
-  ioWrite io 2 BYTE val busInput busOutput =
-    return (io {ioOutput = Just $ toEnum $ fromIntegral val}, busInput, busOutput)
+  ioWrite io 2 BYTE val =
+    return (io {ioOutput = Just $ toEnum $ fromIntegral val})
   
-  ioWrite io 4 BYTE val busInput busOutput =
-    return (io {ioOutput = Just $ toEnum $ fromIntegral val}, busInput, busOutput)
+  ioWrite io 4 BYTE val =
+    return (io {ioOutput = Just $ toEnum $ fromIntegral val})
 

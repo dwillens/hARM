@@ -20,8 +20,7 @@ module ARM.Simulator.Text (simulate) where
                      ,bus :: Bus
                      ,machine :: Machine
                      ,as :: Async Char
-                     ,input :: String
-                     ,output :: String
+                     ,busIO :: BusIO
                      }
 
   memSize :: (Integral a) => a
@@ -35,7 +34,7 @@ module ARM.Simulator.Text (simulate) where
        when term $ hSetEcho stdin False
        bus <- makeBus program
        as <- async getChar
-       runWorld $ World True bus reset as "" "" 
+       runWorld $ World True bus reset as ("", "")
 
   runWorld :: World -> IO ()
   runWorld w = if running w 
@@ -45,7 +44,7 @@ module ARM.Simulator.Text (simulate) where
                 else return ()
 
   performIO :: World -> IO World
-  performIO w@(World _ _ _ as input output) =
+  performIO w@(World _ _ _ as (input, output)) =
     do output' <- if null output 
                     then return output
                     else do putStr output; return ""
@@ -53,36 +52,64 @@ module ARM.Simulator.Text (simulate) where
        case asyncResult of
             Just (Right c) ->
               do as' <- async getChar
-                 return w {as = as', input = input ++ [c], output = output'}
+                 return w {as = as', busIO = (input ++ [c], output')}
             Just (Left e) -> error $ show e
-            Nothing -> return w {output = output'}
+            Nothing -> return w {busIO = (input, output')}
 
+  worldRead :: BusAddress -> MemSize -> StateT World IO Word32
+  worldRead addr sz = do
+    bus <- gets bus
+    busIO <- gets busIO
+    ((val, bus'), busIO') <- lift $ flip runStateT busIO $ busRead bus addr sz
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+    return val
 
-  busCycle :: World -> IO World
-  busCycle w@(World run bus machine _ input output) = do
-    let pc = evalState (getRegister R15) machine
-    (ir, bus', input', output') <- busRead bus pc WORD input output
+  worldWrite :: BusAddress -> MemSize -> Word32 -> StateT World IO ()
+  worldWrite addr sz val = do
+    bus <- gets bus
+    busIO <- gets busIO
+    (bus', busIO') <- lift $ flip runStateT busIO $ busWrite bus addr sz val
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+
+  fetchAndStep :: StateT World IO Action
+  fetchAndStep = do
+    machine <- gets machine
+    let pc = flip evalState machine $ getRegister R15
+    ir <- worldRead pc WORD
     let (action, machine') = 
           flip runState machine $ do modify $ \s -> s {ir = ir}
                                      setRegister R15 (pc + 4)
                                      step
-    case action of
-      Stop -> return w {running = False, bus = bus', machine = machine'}
-      Continue -> return w {bus = bus', machine = machine'}
-      ReadMem rd addr sz sg -> 
-        do (val, bus'', input'', output'') <- busRead bus' addr sz input' output'
-           let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
-           let val' = if sg then dropBits bits val
-                            else let sVal = fromIntegral val :: Int32 
-                                 in fromIntegral $ dropBits bits sVal
-           let machine'' = flip execState machine' $ setRegister rd val'
-           return w {bus = bus'', machine = machine''
-                    ,input = input'', output = output'}
-      WriteMem rd addr sz -> 
-        do let val = flip evalState machine' $ getRegister rd 
-           (bus'', input'', output'') <- busWrite bus' addr sz val input' output'
-           return w {bus = bus'', machine = machine'
-                    ,input = input'', output = output''}
+    modify $ \w -> w {machine = machine'}
+    return action
+
+  execRead :: Register -> BusAddress -> MemSize -> Signedness ->
+             StateT World IO ()
+  execRead rd addr sz sg =
+    do val <- worldRead addr sz
+       let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
+       let val' = if sg then dropBits bits val
+                       else let sVal = fromIntegral val :: Int32 
+                            in fromIntegral $ dropBits bits sVal
+       machine <- gets machine
+       let machine' = flip execState machine $ setRegister rd val'
+       modify $ \w -> w {machine = machine'}
+       return ()
     where dropBits :: (Bits a) => Int -> a -> a
           dropBits sh val = (val `shiftL` sh) `shiftR` sh
+
+  execWrite :: Register -> BusAddress -> MemSize -> StateT World IO ()
+  execWrite rd addr sz = do
+    machine <- gets machine
+    let val = flip evalState machine $ getRegister rd 
+    worldWrite addr sz val
+
+  busCycle :: World -> IO World
+  busCycle = execStateT $ do
+    action <- fetchAndStep
+    case action of
+      Stop -> modify $ \w -> w {running = False}
+      Continue -> return ()
+      ReadMem rd addr sz sg -> execRead rd addr sz sg
+      WriteMem rd addr sz -> execWrite rd addr sz
 
