@@ -18,11 +18,10 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   simulate :: [Word32] -> IO ()
   simulate program = do
     bus <- makeBus program
-    let machine = reset
     playIO (InWindow "ARM" (1024,768) (100, 100))
            white
            600
-           (World False bus machine ("", "") (GlossEtc 3.0 0.0 0))
+           (World False bus reset ("", "") (GlossEtc 3.0 0.0 0))
            drawWorld
            handleEvent
            handleFrame
