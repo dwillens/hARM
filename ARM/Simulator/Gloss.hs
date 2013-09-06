@@ -17,14 +17,11 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
 
   import Debug.Trace
 
-  data World = World {running :: Bool
-                     ,initDelay :: Float
-                     ,delay :: Float
-                     ,tsc :: Integer
-                     ,bus :: Bus
-                     ,machine :: Machine
-                     ,busIO :: (String, String)
-                     }
+  data GlossEtc = GlossEtc {initDelay :: Float
+                           ,delay :: Float
+                           ,tsc :: Integer
+                           }
+  type GlossWorld = World GlossEtc
 
   simulate :: [Word32] -> IO ()
   simulate program = do
@@ -33,34 +30,44 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
     playIO (InWindow "ARM" (1024,768) (100, 100))
            white
            600
-           (World False 3.0 0.0 0 bus machine ("", ""))
+           (World False bus machine ("", "") (GlossEtc 3.0 0.0 0))
            draw
            handleEvent
-           (\t w -> if running w
-                      then let w' = w { delay = delay w - t }
-                           in if delay w' < 0 
-                                then busCycle $ w' { delay = initDelay w }
-                                else return w'
-                      else return w)
+           handleFrame
 
-  handleEvent :: Event -> World -> IO World
-  handleEvent (EventKey (SpecialKey KeyF1) Up _ _) w = 
-    return w {running = not $ running w}
-  handleEvent (EventKey (SpecialKey KeyF2) Up _ _) w = return w {initDelay = initDelay w / 2 }
-  handleEvent (EventKey (SpecialKey KeyF3) Up _ _) w = return w {initDelay = initDelay w * 2}
-  handleEvent (EventKey (SpecialKey KeyF8) Up _ _) w = busCycle w
-  handleEvent (EventKey (Char c) Up _ _) w = execStateT (worldInput c) w
-  handleEvent (EventKey (SpecialKey KeySpace) Up _ _) w = execStateT (worldInput ' ') w
-  handleEvent (EventKey (SpecialKey KeyEnter) Up _ _) w = execStateT (worldInput '\n') w
-  handleEvent _ w = return w
+  handleFrame :: Float -> GlossWorld -> IO GlossWorld
+  handleFrame t = execStateT $ do
+    running <- gets running
+    when running $ modify $ \w -> let e = etc w 
+                                  in w {etc = e {delay = delay e - t}}
+    delay <- liftM delay $ gets etc
+    when (running && delay < 0) $ do 
+      modify $ \w -> let e = etc w in w {etc = e {delay = initDelay e}}
+      busCycle
 
-  worldInput :: Char -> StateT World IO ()
+  handleEvent :: Event -> GlossWorld -> IO GlossWorld
+  handleEvent (EventKey k Up _ _) = execStateT $ handleKey k
+  handleEvent _ = return 
+
+  handleKey :: Key -> StateT GlossWorld IO ()
+  handleKey (SpecialKey KeyF1) = modify $ \w -> w {running = not $ running w}
+  handleKey (SpecialKey KeyF2) = modify $ \w -> 
+    let e = etc w in w {etc = e {initDelay = initDelay e / 2}}
+  handleKey (SpecialKey KeyF3) = modify $ \w -> 
+    let e = etc w in w {etc = e {initDelay = initDelay e * 2}}
+  handleKey (SpecialKey KeyF8) = busCycle
+  handleKey (Char c) = worldInput c
+  handleKey (SpecialKey KeySpace) = worldInput ' '
+  handleKey (SpecialKey KeyEnter) = worldInput '\n'
+  handleKey _ = return ()
+
+  worldInput :: Char -> StateT GlossWorld IO ()
   worldInput c = do
     (input, output) <- gets busIO
     modify $ \w -> w {busIO = (input ++ [c], output)}
 
-  draw :: World -> IO Picture
-  draw (World _ _ _ t b m (_, o)) = return $ 
+  draw :: GlossWorld -> IO Picture
+  draw (World _ b m (_, o) (GlossEtc _ _ t)) = return $ 
     pictures [translate (-500.0) 350.0 $ color orange $ drawShow t
              ,translate (-500.0) 300.0 $ color green $ drawRF m 
              ,translate (-250.0) 300.0 $ color blue $ drawShow $ disassembleI $ ir m
@@ -85,59 +92,3 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
                         $ pictures [text $ show r
                                    ,translate 400.0 0 $ text $ printf "%08x" w]
 
-  worldRead :: BusAddress -> MemSize -> StateT World IO Word32
-  worldRead addr sz = do
-    bus <- gets bus
-    busIO <- gets busIO
-    ((val, bus'), busIO') <- lift $ flip runStateT busIO $ busRead bus addr sz
-    modify $ \w -> w {bus = bus', busIO = busIO'}
-    return val
-
-  worldWrite :: BusAddress -> MemSize -> Word32 -> StateT World IO ()
-  worldWrite addr sz val = do
-    bus <- gets bus
-    busIO <- gets busIO
-    (bus', busIO') <- lift $ flip runStateT busIO $ busWrite bus addr sz val
-    modify $ \w -> w {bus = bus', busIO = busIO'}
-
-  fetchAndStep :: StateT World IO Action
-  fetchAndStep = do
-    machine <- gets machine
-    let pc = flip evalState machine $ getRegister R15
-    ir <- worldRead pc WORD
-    let (action, machine') = 
-          flip runState machine $ do modify $ \s -> s {ir = ir}
-                                     setRegister R15 (pc + 4)
-                                     step
-    modify $ \w -> w {machine = machine'}
-    return action
-
-  execRead :: Register -> BusAddress -> MemSize -> Signedness ->
-             StateT World IO ()
-  execRead rd addr sz sg =
-    do val <- worldRead addr sz
-       let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
-       let val' = if sg then dropBits bits val
-                       else let sVal = fromIntegral val :: Int32 
-                            in fromIntegral $ dropBits bits sVal
-       machine <- gets machine
-       let machine' = flip execState machine $ setRegister rd val'
-       modify $ \w -> w {machine = machine'}
-       return ()
-    where dropBits :: (Bits a) => Int -> a -> a
-          dropBits sh val = (val `shiftL` sh) `shiftR` sh
-
-  execWrite :: Register -> BusAddress -> MemSize -> StateT World IO ()
-  execWrite rd addr sz = do
-    machine <- gets machine
-    let val = flip evalState machine $ getRegister rd 
-    worldWrite addr sz val
-
-  busCycle :: World -> IO World
-  busCycle = execStateT $ do
-    action <- fetchAndStep
-    case action of
-      Stop -> modify $ \w -> w {running = False}
-      Continue -> return ()
-      ReadMem rd addr sz sg -> execRead rd addr sz sg
-      WriteMem rd addr sz -> execWrite rd addr sz

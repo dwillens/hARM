@@ -1,16 +1,8 @@
-module ARM.Simulator.Common (Machine(..)
-                            ,Bus
-                            ,BusDevice(..)
-                            ,MemoryDevice(..)
-                            ,Action(..)
-                            ,BusIO
+module ARM.Simulator.Common (World(..)
+                            ,Machine(..)
                             ,reset
-                            ,getRegister
-                            ,setRegister
-                            ,busRead
-                            ,busWrite
+                            ,busCycle
                             ,makeBus
-                            ,step
                             ) where
 
   import ARM.Disassembler
@@ -23,6 +15,12 @@ module ARM.Simulator.Common (Machine(..)
   import Data.Int
   import Data.Word
 
+  data World e = World {running :: Bool
+                       ,bus :: Bus
+                       ,machine :: Machine
+                       ,busIO :: BusIO
+                       ,etc :: e
+                       }
 
   data Machine = Machine {rf :: Array Register Word32
                          ,ir :: Word32
@@ -335,4 +333,62 @@ module ARM.Simulator.Common (Machine(..)
   
   ioWrite io 4 BYTE val =
     return (io {ioOutput = Just $ toEnum $ fromIntegral val})
+
+
+  worldRead :: BusAddress -> MemSize -> StateT (World e) IO Word32
+  worldRead addr sz = do
+    bus <- gets bus
+    busIO <- gets busIO
+    ((val, bus'), busIO') <- lift $ flip runStateT busIO $ busRead bus addr sz
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+    return val
+
+  worldWrite :: BusAddress -> MemSize -> Word32 -> StateT (World e) IO ()
+  worldWrite addr sz val = do
+    bus <- gets bus
+    busIO <- gets busIO
+    (bus', busIO') <- lift $ flip runStateT busIO $ busWrite bus addr sz val
+    modify $ \w -> w {bus = bus', busIO = busIO'}
+
+  fetchAndStep :: StateT (World e) IO Action
+  fetchAndStep = do
+    machine <- gets machine
+    let pc = flip evalState machine $ getRegister R15
+    ir <- worldRead pc WORD
+    let (action, machine') = 
+          flip runState machine $ do modify $ \s -> s {ir = ir}
+                                     setRegister R15 (pc + 4)
+                                     step
+    modify $ \w -> w {machine = machine'}
+    return action
+
+  execRead :: Register -> BusAddress -> MemSize -> Signedness ->
+             StateT (World e) IO ()
+  execRead rd addr sz sg =
+    do val <- worldRead addr sz
+       let bits = case sz of WORD -> 0; HALF -> 16; BYTE -> 24
+       let val' = if sg then dropBits bits val
+                       else let sVal = fromIntegral val :: Int32 
+                            in fromIntegral $ dropBits bits sVal
+       machine <- gets machine
+       let machine' = flip execState machine $ setRegister rd val'
+       modify $ \w -> w {machine = machine'}
+       return ()
+    where dropBits :: (Bits a) => Int -> a -> a
+          dropBits sh val = (val `shiftL` sh) `shiftR` sh
+
+  execWrite :: Register -> BusAddress -> MemSize -> StateT (World e) IO ()
+  execWrite rd addr sz = do
+    machine <- gets machine
+    let val = flip evalState machine $ getRegister rd 
+    worldWrite addr sz val
+
+  busCycle :: StateT (World e) IO ()
+  busCycle = do
+    action <- fetchAndStep
+    case action of
+      Stop -> modify $ \w -> w {running = False}
+      Continue -> return ()
+      ReadMem rd addr sz sg -> execRead rd addr sz sg
+      WriteMem rd addr sz -> execWrite rd addr sz
 
