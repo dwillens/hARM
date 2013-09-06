@@ -1,21 +1,13 @@
 module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
-
   import ARM.InstructionSet as I
   import ARM.Disassembler
   import ARM.Simulator.Common
-  import Control.Monad
   import Control.Monad.State
   import Data.Array
-  import Data.Array.MArray
-  import Data.Array.IO
-  import Data.Bits
-  import Data.Int
   import Data.Word
   import Graphics.Gloss
   import Graphics.Gloss.Interface.IO.Game
   import Text.Printf
-
-  import Debug.Trace
 
   data GlossEtc = GlossEtc {initDelay :: Float
                            ,delay :: Float
@@ -31,7 +23,7 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
            white
            600
            (World False bus machine ("", "") (GlossEtc 3.0 0.0 0))
-           draw
+           drawWorld
            handleEvent
            handleFrame
 
@@ -42,7 +34,8 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
                                   in w {etc = e {delay = delay e - t}}
     delay <- liftM delay $ gets etc
     when (running && delay < 0) $ do 
-      modify $ \w -> let e = etc w in w {etc = e {delay = initDelay e}}
+      modify $ \w -> let e = etc w in w {etc = e {delay = initDelay e
+                                                 ,tsc = tsc e + 1}}
       busCycle
 
   handleEvent :: Event -> GlossWorld -> IO GlossWorld
@@ -66,11 +59,12 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
     (input, output) <- gets busIO
     modify $ \w -> w {busIO = (input ++ [c], output)}
 
-  draw :: GlossWorld -> IO Picture
-  draw (World _ b m (_, o) (GlossEtc _ _ t)) = return $ 
+  drawWorld :: GlossWorld -> IO Picture
+  drawWorld (World _ b m (_, o) (GlossEtc _ _ t)) = return $ 
     pictures [translate (-500.0) 350.0 $ color orange $ drawShow t
              ,translate (-500.0) 300.0 $ color green $ drawRF m 
-             ,translate (-250.0) 300.0 $ color blue $ drawShow $ disassembleI $ ir m
+             ,translate (-250.0) 300.0 $ color blue $ drawShow $ 
+                disassembleI $ ir m
              ,translate (-500.0) (-100.0) $ color black $ drawOutput o
              ]
 
