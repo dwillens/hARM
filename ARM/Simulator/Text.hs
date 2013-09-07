@@ -7,9 +7,6 @@ module ARM.Simulator.Text (simulate) where
 
   type TextWorld = World (Async Char)
 
-  memSize :: (Integral a) => a
-  memSize = 0x200000
-
   simulate :: [Word32] -> IO ()
   simulate program = 
     do hSetBuffering stdin NoBuffering
