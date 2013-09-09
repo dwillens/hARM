@@ -22,7 +22,7 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
     playIO (InWindow "ARM" (1024,768) (100, 100))
            white
            600
-           (World False bus reset ("", "") (GlossEtc 3.0 0.0 0))
+           (World False bus reset ("", "") $ GlossEtc 3.0 0.0 0)
            drawWorld
            handleEvent
            handleFrame
@@ -30,12 +30,12 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   handleFrame :: Float -> GlossWorld -> IO GlossWorld
   handleFrame t = execStateT $ do
     running <- gets running
-    when running $ modify $ \w -> let e = etc w 
-                                  in w {etc = e {delay = delay e - t}}
+    when running $ modify $ \w -> 
+      let e = etc w in w {etc = e {delay = delay e - t}}
     delay <- liftM delay $ gets etc
     when (running && delay < 0) $ do 
-      modify $ \w -> let e = etc w in w {etc = e {delay = initDelay e
-                                                 ,tsc = tsc e + 1}}
+      modify $ \w ->
+        let e = etc w in w {etc = e {delay = initDelay e ,tsc = tsc e + 1}}
       busCycle
 
   handleEvent :: Event -> GlossWorld -> IO GlossWorld
@@ -71,8 +71,9 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   drawOutput :: String -> Picture
   drawOutput o = translate 200.0 0.0 $ pictures $ [label, output]
     where label = translate (-200.0) 0.0 $ scale 0.3 0.3 $ text $ "output: "
-          output = pictures $ zipWith (translate 0.0) [0,-60.0..] outputLines
-          outputLines = map (scale 0.3 0.3 . text) $ lines o
+          output = pictures $ zipWith (translate 0.0) [0,-45.0..] outputLines
+          outputLines = map (scale 0.3 0.3 . text) $ lastN 7 $ lines o
+          lastN n = reverse . take n . reverse
 
   drawShow :: Show a => a -> Picture
   drawShow s = scale 0.2 0.2 $ text $ show s
@@ -93,5 +94,5 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
     where flags :: [Bool]
           flags = [c, n, v, z] <*> [m]
           drawFlag :: Float -> Char -> Bool -> Picture
-          drawFlag x f b = translate x 0.0 $ scale 0.2 0.2 $ 
-            color (if b then dark azure else light $ light azure) $ text [f]
+          drawFlag x f b = translate x 0.0 $ scale 0.2 0.2 $ fColor b $ text [f]
+          fColor b = color $ if b then dark azure else light (light azure)
