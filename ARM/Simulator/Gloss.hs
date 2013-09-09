@@ -2,6 +2,7 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   import ARM.InstructionSet as I
   import ARM.Disassembler
   import ARM.Simulator.Common
+  import Control.Applicative
   import Control.Monad.State
   import Data.Array
   import Data.Word
@@ -54,16 +55,16 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   handleKey _ = return ()
 
   worldInput :: Char -> StateT GlossWorld IO ()
-  worldInput c = do
-    (input, output) <- gets busIO
-    modify $ \w -> w {busIO = (input ++ [c], output)}
+  worldInput c = modify $ \w -> 
+    w {busIO = (fst (busIO w) ++ [c], snd $ busIO w)}
 
   drawWorld :: GlossWorld -> IO Picture
   drawWorld (World _ b m (_, o) (GlossEtc _ _ t)) = return $ 
     pictures [translate (-500.0) 350.0 $ color orange $ drawShow t
-             ,translate (-500.0) 300.0 $ color green $ drawRF m 
+             ,translate (-500.0) 300.0 $ drawRF m 
              ,translate (-250.0) 300.0 $ color blue $ drawShow $ 
                 disassembleI $ ir m
+             ,translate (-500.0) (-40.0) $ drawFlags m
              ,translate (-500.0) (-100.0) $ color black $ drawOutput o
              ]
 
@@ -79,9 +80,18 @@ module ARM.Simulator.Gloss (ARM.Simulator.Gloss.simulate) where
   drawRF :: Machine -> Picture
   drawRF m = pictures $ map (uncurry drawReg) $ assocs $ rf m
     where drawReg :: Register -> Word32 -> Picture
-          drawReg r w = translate 0.0 (fromIntegral (fromEnum r) * (-20.0)) 
+          drawReg r w = translate 0.0 (x r)
                         $ scale 0.1 0.1
-                        $ color black 
+                        $ color green 
                         $ pictures [text $ show r
                                    ,translate 400.0 0 $ text $ printf "%08x" w]
+          x :: Register -> Float
+          x r = (-20.0) * fromIntegral (fromEnum r) 
 
+  drawFlags :: Machine -> Picture
+  drawFlags m = pictures $ zipWith3 drawFlag [0,50..] "CNVZ" flags
+    where flags :: [Bool]
+          flags = [c, n, v, z] <*> [m]
+          drawFlag :: Float -> Char -> Bool -> Picture
+          drawFlag x f b = translate x 0.0 $ scale 0.2 0.2 $ 
+            color (if b then dark azure else light $ light azure) $ text [f]
