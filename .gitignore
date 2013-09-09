@@ -1,3 +1,5 @@
+*.o
+*.hi
 Test_ARMAssembler
 Test_ARMParser
 Test_MIF
